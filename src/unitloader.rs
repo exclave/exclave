@@ -1,8 +1,15 @@
+extern crate notify;
+
 use std::path::{Path, PathBuf};
 use std::io;
 use std::sync::mpsc::{channel, Sender, Receiver};
+use std::sync::{Mutex, Arc};
 use std::ffi::OsStr;
 use std::fmt;
+use std::time::Duration;
+use std::thread;
+
+use self::notify::{RecommendedWatcher, Watcher, RecursiveMode};
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub enum UnitKind {
@@ -14,9 +21,9 @@ pub enum UnitKind {
 impl fmt::Display for UnitKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Jig => write!(f, "jig"),
-            Scenario => write!(f, "scenario"),
-            Test => write!(f, "test"),
+            &UnitKind::Jig => write!(f, "jig"),
+            &UnitKind::Scenario => write!(f, "scenario"),
+            &UnitKind::Test => write!(f, "test"),
         }
     }
 }
@@ -81,17 +88,21 @@ pub enum UnitStatus {
 impl fmt::Display for UnitStatus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Added => write!(f, "Added"),
-            Updated => write!(f, "Updated"),
+            &UnitStatus::Added => write!(f, "Added"),
+            &UnitStatus::Updated => write!(f, "Updated"),
             &UnitStatus::LoadStarted(ref x) => write!(f, "Load started: {}", x),
             &UnitStatus::LoadFailed(ref x) => write!(f, "Load failed: {}", x),
             &UnitStatus::UnitIncompatible(ref x) => write!(f, "Incompatible: {}", x),
-            UnitSelected => write!(f, "Selected"),
-            UnitDeselected => write!(f, "Deselected"),
-            UnitActive => write!(f, "Active"),
-            &UnitStatus::UnitDeactivatedSuccessfully(ref x) => write!(f, "Deactivated successfully: {}", x),
-            &UnitStatus::UnitDeactivatedUnsuccessfully(ref x) => write!(f, "Deactivated unsuccessfilly: {}", x),
-            Deleted => write!(f, "Deleted"),
+            &UnitStatus::UnitSelected => write!(f, "Selected"),
+            &UnitStatus::UnitDeselected => write!(f, "Deselected"),
+            &UnitStatus::UnitActive => write!(f, "Active"),
+            &UnitStatus::UnitDeactivatedSuccessfully(ref x) => {
+                write!(f, "Deactivated successfully: {}", x)
+            }
+            &UnitStatus::UnitDeactivatedUnsuccessfully(ref x) => {
+                write!(f, "Deactivated unsuccessfilly: {}", x)
+            }
+            &UnitStatus::Deleted => write!(f, "Deleted"),
         }
     }
 }
@@ -104,25 +115,75 @@ pub struct UnitStatusEvent {
 
 pub struct UnitLoader {
     paths: Vec<PathBuf>,
-    senders: Vec<Sender<UnitStatusEvent>>,
+    senders: Arc<Mutex<Vec<Sender<UnitStatusEvent>>>>,
+    watcher: RecommendedWatcher,
 }
 
 impl UnitLoader {
     pub fn new() -> UnitLoader {
+        let senders = Arc::new(Mutex::new(vec![]));
+        let (watcher_tx, watcher_rx) = channel();
+
+        // Automatically select the best implementation for your platform.
+        // You can also access each implementation directly e.g. INotifyWatcher.
+        let mut watcher: RecommendedWatcher = Watcher::new(watcher_tx, Duration::from_secs(2))
+            .unwrap();
+
+        // This is a simple loop, but you may want to use more complex logic here,
+        // for example to handle I/O.
+        let notify_senders = senders.clone();
+        thread::spawn(move || {
+            loop {
+                match watcher_rx.recv() {
+                    Ok(event) => {
+                        let status_event = match event {
+                            notify::DebouncedEvent::Create(path) => {
+                                UnitStatusEvent {
+                                    name: Self::file_to_unit_name(&path).unwrap(),
+                                    status: UnitStatus::Added,
+                                }
+                            }
+                            notify::DebouncedEvent::Write(path) => {
+                                UnitStatusEvent {
+                                    name: Self::file_to_unit_name(&path).unwrap(),
+                                    status: UnitStatus::Updated,
+                                }
+                            }
+                            notify::DebouncedEvent::Remove(path) => {
+                                UnitStatusEvent {
+                                    name: Self::file_to_unit_name(&path).unwrap(),
+                                    status: UnitStatus::Deleted,
+                                }
+                            }
+                            _ => continue,
+                        };
+
+                        for sender in notify_senders.lock().unwrap().iter() {
+                            let ref other_sender: Sender<UnitStatusEvent> = (*sender);
+                            sender.send(status_event.clone());
+                        }
+                    }
+                    Err(e) => println!("watch error: {:?}", e),
+                }
+            }
+            println!("Fell off end of receive thread");
+        });
+
         UnitLoader {
             paths: vec![],
-            senders: vec![],
+            senders: senders,
+            watcher: watcher,
         }
     }
 
     pub fn subscribe(&mut self) -> Receiver<UnitStatusEvent> {
         let (sender, receiver) = channel();
-        self.senders.push(sender);
+        self.senders.lock().unwrap().push(sender);
         receiver
     }
 
-    pub fn add_file(&mut self, unit_name: UnitName) {
-        for sender in &self.senders {
+    fn add_unit(&self, unit_name: UnitName) {
+        for sender in self.senders.lock().unwrap().iter() {
             sender.send(UnitStatusEvent {
                 name: unit_name.clone(),
                 status: UnitStatus::Added,
@@ -130,48 +191,58 @@ impl UnitLoader {
         }
     }
 
+    fn file_to_unit_name(path: &Path) -> Option<UnitName> {
+
+        // Get the extension.  An empty extension is 'valid'
+        // although it will get rejected below.
+        let extension = match path.extension() {
+            None => "".to_owned(),
+            Some(s) => s.to_str().unwrap_or("").to_owned(),
+        };
+
+        // Get the unit ID.  An empty unit ID is considered invalid.
+        let unit_id = match path.file_stem() {
+            None => return None,
+            Some(s) => s.to_str().unwrap_or("").to_owned(),
+        };
+
+        // Perform the extension-to-unit-kind mapping.  Reject invalid
+        // or unrecognized unit kinds.
+        let unit_kind = match extension.as_str() {
+            "jig" => UnitKind::Jig,
+            "scenario" => UnitKind::Scenario,
+            "test" => UnitKind::Test,
+            _ => return None,
+        };
+
+        Some(UnitName {
+            id: unit_id,
+            kind: unit_kind,
+        })
+    }
+
     pub fn add_path(&mut self, config_dir: &str) -> Result<(), io::Error> {
         let dir = Path::new(config_dir);
         for entry in dir.read_dir()? {
-            let entry = entry?;
-
-            // Only operate on files (and symlinks)
-            {
-                let file_type = entry.file_type()?;
-                if !file_type.is_file() && !file_type.is_symlink() {
-                    continue;
-                }
-            }
-
-            // Pull out the extension.  An empty extension is 'valid'
-            // although it will get rejected below.
-            let extension = match entry.path().extension() {
-                None => "".to_owned(),
-                Some(s) => s.to_str().unwrap_or("").to_owned(),
-            };
-
-            // Pull out the unit ID.  An empty unit ID is considered invalid.
-            let unit_id = match entry.path().file_stem() {
+            let unit_name = match Self::file_to_unit_name(&entry?.path()) {
                 None => continue,
-                Some(s) => s.to_str().unwrap_or("").to_owned(),
+                Some(s) => s,
             };
 
-            // Perform the extension-to-unit-kind mapping.  Reject invalid
-            // or unrecognized unit kinds.
-            let unit_kind = match extension.as_str() {
-                "jig" => UnitKind::Jig,
-                "scenario" => UnitKind::Scenario,
-                "test" => UnitKind::Test,
-                _ => continue,
-            };
-
-            let unit_name = UnitName {
-                id: unit_id,
-                kind: unit_kind,
-            };
-            self.add_file(unit_name);
+            self.add_unit(unit_name);
         }
+
+        self.watch(&dir);
         self.paths.push(dir.to_owned());
+        Ok(())
+    }
+
+    fn watch(&mut self, path: &Path) -> notify::Result<()> {
+
+        // Add a path to be watched. All files and directories at that path and
+        // below will be monitored for changes.
+        try!(self.watcher.watch(path, RecursiveMode::Recursive));
+
         Ok(())
     }
 }

@@ -1,38 +1,12 @@
 extern crate ctrlc;
-extern crate notify;
 extern crate clap;
 
 mod unitloader;
 mod terminal;
 
-use notify::{RecommendedWatcher, Watcher, RecursiveMode};
 use clap::{Arg, App};
-use std::sync::mpsc::channel;
-use std::time::Duration;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-
-fn watch() -> notify::Result<()> {
-    // Create a channel to receive the events.
-    let (tx, rx) = channel();
-
-    // Automatically select the best implementation for your platform.
-    // You can also access each implementation directly e.g. INotifyWatcher.
-    let mut watcher: RecommendedWatcher = try!(Watcher::new(tx, Duration::from_secs(2)));
-
-    // Add a path to be watched. All files and directories at that path and
-    // below will be monitored for changes.
-    try!(watcher.watch("/home/test/notify", RecursiveMode::NonRecursive));
-
-    // This is a simple loop, but you may want to use more complex logic here,
-    // for example to handle I/O.
-    loop {
-        match rx.recv() {
-            Ok(event) => println!("{:?}", event),
-            Err(e) => println!("watch error: {:?}", e),
-        }
-    }
-}
 
 fn main() {
     // The signal handler must come first, so that the same mask gets
