@@ -1,6 +1,6 @@
 extern crate console;
 
-use self::console::{Term, Style, style};
+use self::console::Term;
 use unitloader;
 use std::collections::HashMap;
 use std::sync::mpsc::Receiver;
@@ -8,7 +8,6 @@ use std::thread;
 
 #[derive(PartialEq)]
 pub enum TerminalOutputType {
-    Default,
     Fancy,
     Plain,
     None,
@@ -18,17 +17,16 @@ pub struct TerminalInterface {
     output_type: TerminalOutputType,
     unit_status: HashMap<unitloader::UnitName, unitloader::UnitStatus>,
     terminal: Term,
-    style: Style,
 }
 
 impl TerminalInterface {
-    pub fn start(output_type: TerminalOutputType,
+    pub fn start(output_type: Option<TerminalOutputType>,
                  receiver: Receiver<unitloader::UnitStatusEvent>) {
         let stdout = Term::stdout();
-        let output_type = if output_type == TerminalOutputType::Default && stdout.is_term() {
-            TerminalOutputType::Fancy
-        } else {
-            output_type
+        let output_type = match output_type {
+            Some(s) => s,
+            None if stdout.is_term() => TerminalOutputType::Fancy,
+            None => TerminalOutputType::Plain,
         };
 
         thread::spawn(move || {
@@ -36,7 +34,6 @@ impl TerminalInterface {
                 output_type: output_type,
                 unit_status: HashMap::new(),
                 terminal: stdout,
-                style: Style::new(),
             };
 
             while let Ok(event) = receiver.recv() {
@@ -50,16 +47,16 @@ impl TerminalInterface {
         match self.output_type {
             TerminalOutputType::Plain => println!("{} -> {}", event.name, event.status),
             TerminalOutputType::Fancy => self.redraw_screen(event),
-            _ => (),
+            TerminalOutputType::None => (),
         };
     }
 
     fn redraw_screen(&mut self, event: unitloader::UnitStatusEvent) {
         // Clear out the previous entries, plus the headers for the field types.
-        self.terminal.clear_last_lines(self.unit_status.len() + 3);
+        self.terminal.clear_last_lines(self.unit_status.len() + 3).expect("Unable to clear lines");
         self.unit_status.insert(event.name, event.status);
 
-        self.terminal.write_line(format!("{}", console::style("Jigs:").bold()).as_str());
+        self.terminal.write_line(format!("{}", console::style("Jigs:").bold()).as_str()).expect("Unable to write jig header");
         for (event_name, event) in &self.unit_status {
             if event_name.kind() != &unitloader::UnitKind::Jig {
                 continue;
@@ -67,10 +64,10 @@ impl TerminalInterface {
             self.terminal.write_line(format!("    {}: {}",
                                              console::style(event_name).green(),
                                              console::style(event).yellow())
-                .as_str());
+                .as_str()).expect("Unable to write jig");
         }
 
-        self.terminal.write_line(format!("{}", console::style("Scenarios:").bold()).as_str());
+        self.terminal.write_line(format!("{}", console::style("Scenarios:").bold()).as_str()).expect("Unable to write scenario header");
         for (event_name, event) in &self.unit_status {
             if event_name.kind() != &unitloader::UnitKind::Scenario {
                 continue;
@@ -78,10 +75,10 @@ impl TerminalInterface {
             self.terminal.write_line(format!("    {}: {}",
                                              console::style(event_name).green(),
                                              console::style(event).yellow())
-                .as_str());
+                .as_str()).expect("Unable to write scenario");
         }
 
-        self.terminal.write_line(format!("{}", console::style("Tests:").bold()).as_str());
+        self.terminal.write_line(format!("{}", console::style("Tests:").bold()).as_str()).expect("Unable to write test header");
         for (event_name, event) in &self.unit_status {
             if event_name.kind() != &unitloader::UnitKind::Test {
                 continue;
@@ -89,7 +86,7 @@ impl TerminalInterface {
             self.terminal.write_line(format!("    {}: {}",
                                              console::style(event_name).green(),
                                              console::style(event).yellow())
-                .as_str());
+                .as_str()).expect("Unable to write test");
         }
     }
 }

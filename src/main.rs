@@ -37,20 +37,26 @@ fn main() {
             .short("p")
             .long("plain-output")
             .help("Force output to be 'plain' (rather than auto-detected)"))
+        .arg(Arg::with_name("QUIET")
+            .short("a")
+            .long("no-output")
+            .help("Prevent console output entirely"))
         .get_matches();
 
     let config_dirs: Vec<_> = matches.values_of("CONFIG_DIR").unwrap().collect();
-    let output_type = match matches.is_present("PLAIN") {
-        true => terminal::TerminalOutputType::Plain,
-        false => terminal::TerminalOutputType::Default,
+    let output_type = if matches.is_present("PLAIN") {
+        Some(terminal::TerminalOutputType::Plain)
+    } else if matches.is_present("QUIET") {
+        Some(terminal::TerminalOutputType::None)
+    } else {
+        None
     };
 
     let mut unit_loader = unitloader::UnitLoader::new();
     terminal::TerminalInterface::start(output_type, unit_loader.subscribe());
 
     for config_dir in config_dirs {
-        println!("Config dir: {}", config_dir);
-        unit_loader.add_path(config_dir);
+        unit_loader.add_path(config_dir).expect("Unable to add config directory");
     }
 
     // Wait for Control-C to be pressed.

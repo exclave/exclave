@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use std::io;
 use std::sync::mpsc::{channel, Sender, Receiver};
 use std::sync::{Mutex, Arc};
-use std::ffi::OsStr;
 use std::fmt;
 use std::time::Duration;
 use std::thread;
@@ -126,8 +125,8 @@ impl UnitLoader {
 
         // Automatically select the best implementation for your platform.
         // You can also access each implementation directly e.g. INotifyWatcher.
-        let mut watcher: RecommendedWatcher = Watcher::new(watcher_tx, Duration::from_secs(2))
-            .unwrap();
+        let watcher: RecommendedWatcher = Watcher::new(watcher_tx, Duration::from_secs(2))
+            .expect("Unable to create file watcher");
 
         // This is a simple loop, but you may want to use more complex logic here,
         // for example to handle I/O.
@@ -159,14 +158,13 @@ impl UnitLoader {
                         };
 
                         for sender in notify_senders.lock().unwrap().iter() {
-                            let ref other_sender: Sender<UnitStatusEvent> = (*sender);
-                            sender.send(status_event.clone());
+                            let ref other_sender: Sender<UnitStatusEvent> = *sender;
+                            sender.send(status_event.clone()).expect("One of the senders stopped responding.  Exiting!");
                         }
                     }
                     Err(e) => println!("watch error: {:?}", e),
                 }
             }
-            println!("Fell off end of receive thread");
         });
 
         UnitLoader {
@@ -187,7 +185,7 @@ impl UnitLoader {
             sender.send(UnitStatusEvent {
                 name: unit_name.clone(),
                 status: UnitStatus::Added,
-            });
+            }).expect("Failed to send notification to adding a unit.  Aborting.");
         }
     }
 
@@ -232,7 +230,7 @@ impl UnitLoader {
             self.add_unit(unit_name);
         }
 
-        self.watch(&dir);
+        self.watch(&dir).expect("Unable to watch directory");
         self.paths.push(dir.to_owned());
         Ok(())
     }
