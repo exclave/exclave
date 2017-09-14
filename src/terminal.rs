@@ -2,7 +2,7 @@ extern crate console;
 
 use self::console::Term;
 use unitloader;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::mpsc::Receiver;
 use std::thread;
 
@@ -15,7 +15,7 @@ pub enum TerminalOutputType {
 
 pub struct TerminalInterface {
     output_type: TerminalOutputType,
-    unit_status: HashMap<unitloader::UnitName, unitloader::UnitStatus>,
+    unit_status: BTreeMap<unitloader::UnitName, unitloader::UnitStatus>,
     terminal: Term,
 }
 
@@ -32,7 +32,7 @@ impl TerminalInterface {
         thread::spawn(move || {
             let mut ti = TerminalInterface {
                 output_type: output_type,
-                unit_status: HashMap::new(),
+                unit_status: BTreeMap::new(),
                 terminal: stdout,
             };
 
