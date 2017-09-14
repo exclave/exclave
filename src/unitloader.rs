@@ -10,7 +10,7 @@ use std::thread;
 
 use self::notify::{RecommendedWatcher, Watcher, RecursiveMode};
 
-#[derive(PartialEq, Eq, Hash, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Debug, Clone, PartialOrd, Ord)]
 pub enum UnitKind {
     Jig,
     Scenario,
@@ -27,7 +27,7 @@ impl fmt::Display for UnitKind {
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Debug, Clone, PartialOrd, Ord)]
 pub struct UnitName {
     id: String,
     kind: UnitKind,
