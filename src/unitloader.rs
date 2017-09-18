@@ -191,8 +191,11 @@ impl UnitLoader {
                             _ => continue,
                         };
 
-                        for sender in notify_senders.lock().unwrap().iter() {
-                            let ref other_sender: Sender<UnitEvent> = *sender;
+                        // Send a copy of the message to each of the listeners.
+                        let notify_senders_ref = notify_senders.lock().unwrap();
+                        use std::slice::Iter;
+                        let notify_senders_iter: Iter<Sender<UnitEvent>> = notify_senders_ref.iter();
+                        for sender in notify_senders_iter {
                             sender.send(status_event.clone()).expect("One of the senders stopped responding.  Exiting!");
                         }
                     }
