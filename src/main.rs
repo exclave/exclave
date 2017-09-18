@@ -6,16 +6,15 @@ mod unitloader;
 mod terminal;
 
 use clap::{Arg, App};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 fn main() {
+    let unit_broadcaster = unitbroadcaster::UnitBroadcaster::new();
+
     // The signal handler must come first, so that the same mask gets
     // applied to all threads.
-    let is_running = Arc::new(AtomicBool::new(true));
-    let r = is_running.clone();
+    let ctrl_c_broadcaster = unit_broadcaster.clone();
     ctrlc::set_handler(move || {
-            r.store(false, Ordering::SeqCst);
+            ctrl_c_broadcaster.broadcast(&unitbroadcaster::UnitEvent::Shutdown);
         })
         .expect("Error setting Ctrl-C handler");
 
@@ -51,7 +50,6 @@ fn main() {
         None
     };
 
-    let unit_broadcaster = unitbroadcaster::UnitBroadcaster::new();
     let mut unit_loader = unitloader::UnitLoader::new(&unit_broadcaster);
 
     terminal::TerminalInterface::start(output_type, unit_broadcaster.subscribe());
@@ -61,7 +59,10 @@ fn main() {
     }
 
     // Wait for Control-C to be pressed.
-    while is_running.load(Ordering::SeqCst) {
-        println!("Doing a thing");
+    let rx = unit_broadcaster.subscribe();
+    while let Ok(msg) = rx.recv() {
+        if msg == unitbroadcaster::UnitEvent::Shutdown {
+            break;
+        }
     }
 }
