@@ -124,16 +124,18 @@ impl UnitStatusEvent {
     }
 }
 
+pub type UnitCategoryStatus = String;
+
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub struct UnitCategoryEvent {
     pub kind: UnitKind,
-    pub status: String,
+    pub status: UnitCategoryStatus,
 }
 impl UnitCategoryEvent {
     pub fn kind(&self) -> &UnitKind {
         &self.kind
     }
-    pub fn status(&self) -> &String {
+    pub fn status(&self) -> &UnitCategoryStatus {
         &self.status
     }
 }

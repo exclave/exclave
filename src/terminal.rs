@@ -15,10 +15,23 @@ pub enum TerminalOutputType {
 }
 
 pub struct TerminalInterface {
-    output_type: TerminalOutputType,
+    /// A list of known categories, and their statuses.
+    category_status: HashMap<unitloader::UnitKind, unitloader::UnitCategoryStatus>,
+
+    /// A hashmap of unit types, with each bucket containing a tree of units of statuses.
+    /// Each time a status is updated, it is put in its appropriate bucket.
     unit_status: HashMap<unitloader::UnitKind, BTreeMap<unitloader::UnitName, unitloader::UnitStatus>>,
-    category_status: HashMap<unitloader::UnitKind, String>,
+
+    /// The current stdout of the terminal.
     terminal: Term,
+
+    /// The currently-selected Terminal output (i.e. "Fancy", "Plain", "None", ...).
+    output_type: TerminalOutputType,
+
+    /// A list of how many lines was printed during the last fancy print.
+    /// Eventually, printers should be moved to their own Trait, and this
+    /// will go away.
+    last_line_count: u32,
 }
 
 impl TerminalInterface {
@@ -37,6 +50,7 @@ impl TerminalInterface {
                 unit_status: HashMap::new(),
                 category_status: HashMap::new(),
                 terminal: stdout,
+                last_line_count: 0,
             };
 
             while let Ok(event) = receiver.recv() {
