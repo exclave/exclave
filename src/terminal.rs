@@ -1,8 +1,7 @@
 extern crate console;
 
 use self::console::Term;
-use unitloader;
-use unitloader::UnitEvent;
+use unitbroadcaster::{UnitEvent, UnitKind, UnitName, UnitCategoryStatus, UnitStatus};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::mpsc::Receiver;
 use std::thread;
@@ -16,11 +15,11 @@ pub enum TerminalOutputType {
 
 pub struct TerminalInterface {
     /// A list of known categories, and their statuses.
-    category_status: HashMap<unitloader::UnitKind, unitloader::UnitCategoryStatus>,
+    category_status: HashMap<UnitKind, UnitCategoryStatus>,
 
     /// A hashmap of unit types, with each bucket containing a tree of units of statuses.
     /// Each time a status is updated, it is put in its appropriate bucket.
-    unit_status: HashMap<unitloader::UnitKind, BTreeMap<unitloader::UnitName, unitloader::UnitStatus>>,
+    unit_status: HashMap<UnitKind, BTreeMap<UnitName, UnitStatus>>,
 
     /// The current stdout of the terminal.
     terminal: Term,
@@ -36,7 +35,7 @@ pub struct TerminalInterface {
 
 impl TerminalInterface {
     pub fn start(output_type: Option<TerminalOutputType>,
-                 receiver: Receiver<unitloader::UnitEvent>) {
+                 receiver: Receiver<UnitEvent>) {
         let stdout = Term::stdout();
         let output_type = match output_type {
             Some(s) => s,
@@ -77,7 +76,8 @@ impl TerminalInterface {
                     self.unit_status.insert(stat.kind().clone(), BTreeMap::new());
                 }
                 self.unit_status.get_mut(stat.kind()).unwrap().insert(stat.name().clone(), stat.status().clone());
-            }
+            },
+            UnitEvent::Shutdown => (),
         }
 
         match self.output_type {
@@ -91,6 +91,7 @@ impl TerminalInterface {
         match event {
             UnitEvent::Status(stat) => println!("    {} -> {}", stat.name(), stat.status()),
             UnitEvent::Category(stat) => println!("{}: {}", stat.kind(), stat.status()),
+            UnitEvent::Shutdown => println!("Shutting down"),
         };
     }
 

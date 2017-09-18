@@ -1,6 +1,7 @@
 extern crate ctrlc;
 extern crate clap;
 
+mod unitbroadcaster;
 mod unitloader;
 mod terminal;
 
@@ -50,13 +51,17 @@ fn main() {
         None
     };
 
-    let mut unit_loader = unitloader::UnitLoader::new();
-    terminal::TerminalInterface::start(output_type, unit_loader.subscribe());
+    let unit_broadcaster = unitbroadcaster::UnitBroadcaster::new();
+    let mut unit_loader = unitloader::UnitLoader::new(&unit_broadcaster);
+
+    terminal::TerminalInterface::start(output_type, unit_broadcaster.subscribe());
 
     for config_dir in config_dirs {
         unit_loader.add_path(config_dir).expect("Unable to add config directory");
     }
 
     // Wait for Control-C to be pressed.
-    while is_running.load(Ordering::SeqCst) {}
+    while is_running.load(Ordering::SeqCst) {
+        println!("Doing a thing");
+    }
 }
