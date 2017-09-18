@@ -1,7 +1,8 @@
 extern crate console;
 
 use self::console::Term;
-use unitbroadcaster::{UnitEvent, UnitKind, UnitName, UnitCategoryStatus, UnitStatus};
+use unit::{UnitName, UnitKind};
+use unitbroadcaster::{UnitEvent, UnitCategoryStatus, UnitStatus};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::mpsc::Receiver;
 use std::thread;

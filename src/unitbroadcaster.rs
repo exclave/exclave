@@ -3,73 +3,7 @@ use std::sync::mpsc::{channel, Sender, Receiver};
 use std::sync::{Mutex, Arc};
 use std::fmt;
 
-#[derive(PartialEq, Eq, Hash, Debug, Clone, PartialOrd, Ord)]
-pub enum UnitKind {
-    Jig,
-    Scenario,
-    Test,
-}
-
-impl fmt::Display for UnitKind {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &UnitKind::Jig => write!(f, "jig"),
-            &UnitKind::Scenario => write!(f, "scenario"),
-            &UnitKind::Test => write!(f, "test"),
-        }
-    }
-}
-
-#[derive(PartialEq, Eq, Hash, Debug, Clone, PartialOrd, Ord)]
-pub struct UnitName {
-    id: String,
-    kind: UnitKind,
-}
-
-impl UnitName {
-    pub fn kind(&self) -> &UnitKind {
-        &self.kind
-    }
-    pub fn id(&self) -> &String {
-        &self.id
-    }
-
-    pub fn from_path(path: &Path) -> Option<Self> {
-
-        // Get the extension.  An empty extension is 'valid'
-        // although it will get rejected below.
-        let extension = match path.extension() {
-            None => "".to_owned(),
-            Some(s) => s.to_str().unwrap_or("").to_owned(),
-        };
-
-        // Get the unit ID.  An empty unit ID is considered invalid.
-        let unit_id = match path.file_stem() {
-            None => return None,
-            Some(s) => s.to_str().unwrap_or("").to_owned(),
-        };
-
-        // Perform the extension-to-unit-kind mapping.  Reject invalid
-        // or unrecognized unit kinds.
-        let unit_kind = match extension.as_str() {
-            "jig" => UnitKind::Jig,
-            "scenario" => UnitKind::Scenario,
-            "test" => UnitKind::Test,
-            _ => return None,
-        };
-
-        Some(UnitName {
-            id: unit_id,
-            kind: unit_kind,
-        })
-    }
-}
-
-impl fmt::Display for UnitName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}.{}", self.id, self.kind)
-    }
-}
+use unit::{UnitKind, UnitName};
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub enum UnitStatus {
@@ -147,7 +81,7 @@ impl UnitStatusEvent {
         &self.status
     }
     pub fn kind(&self) -> &UnitKind {
-        &self.name.kind
+        &self.name.kind()
     }
     pub fn new_added(path: &Path) -> Option<UnitStatusEvent> {
         let name = match UnitName::from_path(path) {
@@ -182,17 +116,28 @@ impl UnitStatusEvent {
             status: UnitStatus::Removed(path.to_owned()),
         })
     }
-    pub fn new_load_started(path: &Path) -> Option<UnitStatusEvent> {
-        let name = match UnitName::from_path(path) {
-            None => return None,
-            Some(s) => s,
-        };
 
-        Some(UnitStatusEvent {
-            name: name,
+    pub fn new_load_started(name: &UnitName) -> UnitStatusEvent {
+        UnitStatusEvent {
+            name: name.clone(),
             status: UnitStatus::LoadStarted,
-        })
+        }
     }
+
+    pub fn new_load_failed(name: &UnitName, msg: String) -> UnitStatusEvent {
+        UnitStatusEvent {
+            name: name.clone(),
+            status: UnitStatus::LoadFailed(msg),
+        }
+    }
+
+    pub fn new_unit_incompatible(name: &UnitName, msg: String) -> UnitStatusEvent {
+        UnitStatusEvent {
+            name: name.clone(),
+            status: UnitStatus::UnitIncompatible(msg),
+        }
+    }
+
     pub fn new_unloading(path: &Path) -> Option<UnitStatusEvent> {
         let name = match UnitName::from_path(path) {
             None => return None,

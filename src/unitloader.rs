@@ -1,6 +1,9 @@
 use std::path::PathBuf;
-use unitbroadcaster::{UnitBroadcaster, UnitEvent, UnitStatus, UnitStatusEvent};
 use std::sync::mpsc::Receiver;
+
+use unit::{UnitName, UnitKind};
+use unitbroadcaster::{UnitBroadcaster, UnitEvent, UnitStatus, UnitStatusEvent};
+use units::jig::{JigDescription, JigDescriptionError};
 
 pub struct UnitLoader {
     broadcaster: UnitBroadcaster,
@@ -17,12 +20,12 @@ impl UnitLoader {
 
     fn handle_status(&self, event: &UnitStatusEvent) {
         match event.status() {
-            &UnitStatus::Added(ref path) => self.load(path),
+            &UnitStatus::Added(ref path) => self.load(event.name(), path),
             &UnitStatus::Updated(ref path) => {
-                self.load(path);
-                self.unload(path)
+                self.unload(event.name(), path);
+                self.load(event.name(), path)
             }
-            &UnitStatus::Removed(ref path) => self.unload(path),
+            &UnitStatus::Removed(ref path) => self.unload(event.name(), path),
             _ => (),
         }
     }
@@ -37,13 +40,27 @@ impl UnitLoader {
         }
     }
 
-    pub fn load(&self, path: &PathBuf) {
-        if let Some(s) = UnitStatusEvent::new_load_started(path) {
-            self.broadcaster.broadcast(&UnitEvent::Status(s));
+    pub fn load(&self, name: &UnitName, path: &PathBuf) {
+        self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_started(name)));
+
+        // For now, we only support testing Jig
+        if name.kind() == &UnitKind::Jig {
+            let jig_description = match JigDescription::from_path(path) {
+                Err(e) => {
+                    self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_failed(name, format!("{}", e))));
+                    return;
+                }
+                Ok(o) => o,
+            };
+
+            if let Err(e) = jig_description.is_compatible() {
+                self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_unit_incompatible(name, format!("{}", e))));
+                return;
+            }
         }
     }
 
-    pub fn unload(&self, path: &PathBuf) {
+    pub fn unload(&self, name: &UnitName, path: &PathBuf) {
         if let Some(s) = UnitStatusEvent::new_unloading(path) {
             self.broadcaster.broadcast(&UnitEvent::Status(s));
         }

@@ -1,12 +1,14 @@
 extern crate ctrlc;
 extern crate clap;
 
+mod unit;
+mod units;
 mod unitbroadcaster;
 mod unitloader;
 mod unitwatcher;
 mod terminal;
 
-use unitbroadcaster::{UnitEvent, UnitStatusEvent, UnitStatus, UnitBroadcaster};
+use unitbroadcaster::{UnitEvent, UnitBroadcaster};
 use unitwatcher::UnitWatcher;
 use unitloader::UnitLoader;
 
