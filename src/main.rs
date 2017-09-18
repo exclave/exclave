@@ -2,27 +2,19 @@ extern crate ctrlc;
 extern crate clap;
 
 mod unitbroadcaster;
+mod unitloader;
 mod unitwatcher;
 mod terminal;
 
-use unitbroadcaster::{UnitEvent, UnitBroadcaster};
+use unitbroadcaster::{UnitEvent, UnitStatusEvent, UnitStatus, UnitBroadcaster};
 use unitwatcher::UnitWatcher;
+use unitloader::UnitLoader;
 
 use clap::{Arg, App};
 
-fn main_loop(unit_broadcaster: &UnitBroadcaster) {
-    let rx = unit_broadcaster.subscribe();
-    while let Ok(msg) = rx.recv() {
-        match msg {
-            UnitEvent::Shutdown => return,
-            UnitEvent::Status(_) => (),
-            UnitEvent::Category(_) => (),
-        }
-    }
-}
-
 fn main() {
     let unit_broadcaster = UnitBroadcaster::new();
+    let unit_loader = UnitLoader::new(&unit_broadcaster);
 
     // The signal handler must come first, so that the same mask gets
     // applied to all threads.
@@ -64,13 +56,13 @@ fn main() {
         None
     };
 
-    let mut unit_loader = UnitWatcher::new(&unit_broadcaster);
+    let mut unit_watcher = UnitWatcher::new(&unit_broadcaster);
 
     terminal::TerminalInterface::start(output_type, unit_broadcaster.subscribe());
 
     for config_dir in config_dirs {
-        unit_loader.add_path(config_dir).expect("Unable to add config directory");
+        unit_watcher.add_path(config_dir).expect("Unable to add config directory");
     }
 
-    main_loop(&unit_broadcaster);
+    unit_loader.process_messages();
 }

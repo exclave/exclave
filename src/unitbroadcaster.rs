@@ -79,8 +79,8 @@ pub enum UnitStatus {
     /// A unit file on the disk has changed, and the unit will be reloaded
     Updated(PathBuf),
 
-    /// The unit file failed to load for some reason
-    LoadStarted(String /* reason */),
+    /// We started to load the unit file
+    LoadStarted,
 
     /// The unit file failed to load for some reason
     LoadFailed(String /* reason */),
@@ -103,6 +103,9 @@ pub enum UnitStatus {
     /// The unit was active, then stopped being active due to finishing unsuccessfully
     UnitDeactivatedUnsuccessfully(String /* reason */),
 
+    /// The unit successfully loaded, but is being update (or removed)
+    UnloadStarted,
+
     /// The unit file was removed from the disk
     Removed(PathBuf),
 }
@@ -112,7 +115,7 @@ impl fmt::Display for UnitStatus {
         match self {
             &UnitStatus::Added(ref path) => write!(f, "Added {}", path.to_string_lossy()),
             &UnitStatus::Updated(ref path) => write!(f, "Updated {}", path.to_string_lossy()),
-            &UnitStatus::LoadStarted(ref x) => write!(f, "Load started: {}", x),
+            &UnitStatus::LoadStarted => write!(f, "Load started"),
             &UnitStatus::LoadFailed(ref x) => write!(f, "Load failed: {}", x),
             &UnitStatus::UnitIncompatible(ref x) => write!(f, "Incompatible: {}", x),
             &UnitStatus::UnitSelected => write!(f, "Selected"),
@@ -124,6 +127,7 @@ impl fmt::Display for UnitStatus {
             &UnitStatus::UnitDeactivatedUnsuccessfully(ref x) => {
                 write!(f, "Deactivated unsuccessfilly: {}", x)
             }
+            &UnitStatus::UnloadStarted => write!(f, "Unloading"),
             &UnitStatus::Removed(ref path) => write!(f, "Removed {}", path.to_string_lossy()),
         }
     }
@@ -176,6 +180,28 @@ impl UnitStatusEvent {
         Some(UnitStatusEvent {
             name: name,
             status: UnitStatus::Removed(path.to_owned()),
+        })
+    }
+    pub fn new_load_started(path: &Path) -> Option<UnitStatusEvent> {
+        let name = match UnitName::from_path(path) {
+            None => return None,
+            Some(s) => s,
+        };
+
+        Some(UnitStatusEvent {
+            name: name,
+            status: UnitStatus::LoadStarted,
+        })
+    }
+    pub fn new_unloading(path: &Path) -> Option<UnitStatusEvent> {
+        let name = match UnitName::from_path(path) {
+            None => return None,
+            Some(s) => s,
+        };
+
+        Some(UnitStatusEvent {
+            name: name,
+            status: UnitStatus::UnloadStarted,
         })
     }
 }

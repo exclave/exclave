@@ -99,13 +99,14 @@ impl TerminalInterface {
 
         // Clear out the previous entries, plus the headers for the field types.
         self.terminal.clear_last_lines(self.last_line_count).expect("Unable to clear lines");
+
         let mut line_count = 0;
 
         for (category_type, category_status) in &self.category_status {
             self.terminal.write_line(format!("{}: {}",
                                              console::style(category_type).bold(),
                                              console::style(category_status).bold()).as_str())
-                                        .expect("Unable to write jig header");
+                                        .expect("Unable to write unit header");
             line_count = line_count + 1;
 
             for (unit_name, unit_event) in self.unit_status.get(&category_type).expect("Couldn't find any category bucket").iter() {
@@ -113,38 +114,10 @@ impl TerminalInterface {
                 self.terminal.write_line(format!("    {}: {}",
                                                 console::style(unit_name).green(),
                                                 console::style(unit_event).yellow())
-                    .as_str()).expect("Unable to write jig");
+                    .as_str()).expect("Unable to write unit");
             }
         }
-        /*
-        for (event_name, event) in &self.unit_status {
-            if event_name.kind() != &unitloader::UnitKind::Jig {
-                continue;
-            }
-        }
-
-        self.terminal.write_line(format!("{}", console::style("Scenarios:").bold()).as_str()).expect("Unable to write scenario header");
-        for (event_name, event) in &self.unit_status {
-            if event_name.kind() != &unitloader::UnitKind::Scenario {
-                continue;
-            }
-            self.terminal.write_line(format!("    {}: {}",
-                                             console::style(event_name).green(),
-                                             console::style(event).yellow())
-                .as_str()).expect("Unable to write scenario");
-        }
-
-        self.terminal.write_line(format!("{}", console::style("Tests:").bold()).as_str()).expect("Unable to write test header");
-        for (event_name, event) in &self.unit_status {
-            if event_name.kind() != &unitloader::UnitKind::Test {
-                continue;
-            }
-            self.terminal.write_line(format!("    {}: {}",
-                                             console::style(event_name).green(),
-                                             console::style(event).yellow())
-                .as_str()).expect("Unable to write test");
-        }
-        */
+        self.terminal.flush().expect("Couldn't redraw screen");
         self.last_line_count = line_count;
     }
 }

@@ -34,29 +34,16 @@ impl UnitWatcher {
                     Ok(event) => {
                         // Convert the DebouncedEvent into a UnitEvent
                         let status_event = match event {
-                            notify::DebouncedEvent::Create(path) => {
-                                UnitEvent::Status(UnitStatusEvent {
-                                    name: UnitName::from_path(&path).unwrap(),
-                                    status: UnitStatus::Added,
-                                })
-                            }
-                            notify::DebouncedEvent::Write(path) => {
-                                UnitEvent::Status(UnitStatusEvent {
-                                    name: UnitName::from_path(&path).unwrap(),
-                                    status: UnitStatus::Updated,
-                                })
-                            }
-                            notify::DebouncedEvent::Remove(path) => {
-                                UnitEvent::Status(UnitStatusEvent {
-                                    name: UnitName::from_path(&path).unwrap(),
-                                    status: UnitStatus::Deleted,
-                                })
-                            }
-                            _ => continue,
+                            notify::DebouncedEvent::Create(path) => UnitStatusEvent::new_added(&path),
+                            notify::DebouncedEvent::Write(path) => UnitStatusEvent::new_updated(&path),
+                            notify::DebouncedEvent::Remove(path) => UnitStatusEvent::new_removed(&path),
+                            _ => None,
                         };
 
                         // Send a copy of the message to each of the listeners.
-                        thread_broadcaster.broadcast(&status_event);
+                        if let Some(evt) = status_event {
+                            thread_broadcaster.broadcast(&UnitEvent::Status(evt));
+                        }
                     }
                     Err(e) => println!("watch error: {:?}", e),
                 }
@@ -70,22 +57,12 @@ impl UnitWatcher {
         }
     }
 
-    fn add_unit(&mut self, unit_name: UnitName) {
-        self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent {
-                    name: unit_name.clone(),
-                    status: UnitStatus::Added,
-                }));
-    }
-
     pub fn add_path(&mut self, config_dir: &str) -> Result<(), io::Error> {
         let dir = Path::new(config_dir);
         for entry in dir.read_dir()? {
-            let unit_name = match UnitName::from_path(&entry?.path()) {
-                None => continue,
-                Some(s) => s,
-            };
-
-            self.add_unit(unit_name);
+           if let Some(evt) = UnitStatusEvent::new_added(&entry?.path()) {
+               self.broadcaster.broadcast(&UnitEvent::Status(evt));
+           }
         }
 
         self.watch(&dir).expect("Unable to watch directory");
