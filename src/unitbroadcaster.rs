@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Sender, Receiver};
 use std::sync::{Mutex, Arc};
 use std::fmt;
@@ -74,10 +74,10 @@ impl fmt::Display for UnitName {
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub enum UnitStatus {
     /// A new unit file has appeared on the disk
-    Added,
+    Added(PathBuf),
 
     /// A unit file on the disk has changed, and the unit will be reloaded
-    Updated,
+    Updated(PathBuf),
 
     /// The unit file failed to load for some reason
     LoadStarted(String /* reason */),
@@ -104,14 +104,14 @@ pub enum UnitStatus {
     UnitDeactivatedUnsuccessfully(String /* reason */),
 
     /// The unit file was removed from the disk
-    Deleted,
+    Removed(PathBuf),
 }
 
 impl fmt::Display for UnitStatus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            &UnitStatus::Added => write!(f, "Added"),
-            &UnitStatus::Updated => write!(f, "Updated"),
+            &UnitStatus::Added(ref path) => write!(f, "Added {}", path.to_string_lossy()),
+            &UnitStatus::Updated(ref path) => write!(f, "Updated {}", path.to_string_lossy()),
             &UnitStatus::LoadStarted(ref x) => write!(f, "Load started: {}", x),
             &UnitStatus::LoadFailed(ref x) => write!(f, "Load failed: {}", x),
             &UnitStatus::UnitIncompatible(ref x) => write!(f, "Incompatible: {}", x),
@@ -124,7 +124,7 @@ impl fmt::Display for UnitStatus {
             &UnitStatus::UnitDeactivatedUnsuccessfully(ref x) => {
                 write!(f, "Deactivated unsuccessfilly: {}", x)
             }
-            &UnitStatus::Deleted => write!(f, "Deleted"),
+            &UnitStatus::Removed(ref path) => write!(f, "Removed {}", path.to_string_lossy()),
         }
     }
 }
@@ -144,6 +144,39 @@ impl UnitStatusEvent {
     }
     pub fn kind(&self) -> &UnitKind {
         &self.name.kind
+    }
+    pub fn new_added(path: &Path) -> Option<UnitStatusEvent> {
+        let name = match UnitName::from_path(path) {
+            None => return None,
+            Some(s) => s,
+        };
+
+        Some(UnitStatusEvent {
+            name: name,
+            status: UnitStatus::Added(path.to_owned()),
+        })
+    }
+    pub fn new_updated(path: &Path) -> Option<UnitStatusEvent> {
+        let name = match UnitName::from_path(path) {
+            None => return None,
+            Some(s) => s,
+        };
+
+        Some(UnitStatusEvent {
+            name: name,
+            status: UnitStatus::Updated(path.to_owned()),
+        })
+    }
+    pub fn new_removed(path: &Path) -> Option<UnitStatusEvent> {
+        let name = match UnitName::from_path(path) {
+            None => return None,
+            Some(s) => s,
+        };
+
+        Some(UnitStatusEvent {
+            name: name,
+            status: UnitStatus::Removed(path.to_owned()),
+        })
     }
 }
 
