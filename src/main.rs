@@ -12,13 +12,11 @@ fn main() {
     // The signal handler must come first, so that the same mask gets
     // applied to all threads.
     let is_running = Arc::new(AtomicBool::new(true));
-    {
-        let r = is_running.clone();
-        ctrlc::set_handler(move || {
-                r.store(false, Ordering::SeqCst);
-            })
-            .expect("Error setting Ctrl-C handler");
-    }
+    let r = is_running.clone();
+    ctrlc::set_handler(move || {
+            r.store(false, Ordering::SeqCst);
+        })
+        .expect("Error setting Ctrl-C handler");
 
     let matches = App::new("Exclave Testing System")
         .version("1.0")
