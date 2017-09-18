@@ -239,9 +239,10 @@ impl UnitLoader {
     fn add_unit(&self, unit_name: UnitName) {
         for sender in self.senders.lock().unwrap().iter() {
             sender.send(UnitEvent::Status(UnitStatusEvent {
-                name: unit_name.clone(),
-                status: UnitStatus::Added,
-            })).expect("Failed to send notification to adding a unit.  Aborting.");
+                    name: unit_name.clone(),
+                    status: UnitStatus::Added,
+                }))
+                .expect("Failed to send notification to adding a unit.  Aborting.");
         }
     }
 
