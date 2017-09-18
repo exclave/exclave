@@ -2,7 +2,7 @@ extern crate console;
 
 use self::console::Term;
 use unitloader;
-use unitloader::{UnitEvent, UnitCategoryEvent, UnitStatusEvent};
+use unitloader::UnitEvent;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::mpsc::Receiver;
 use std::thread;
@@ -31,7 +31,7 @@ pub struct TerminalInterface {
     /// A list of how many lines was printed during the last fancy print.
     /// Eventually, printers should be moved to their own Trait, and this
     /// will go away.
-    last_line_count: u32,
+    last_line_count: usize,
 }
 
 impl TerminalInterface {
@@ -62,20 +62,14 @@ impl TerminalInterface {
 
     fn update_unit(&mut self, event: UnitEvent) {
 
-        let mut new_items = 0u32;
-
         // Insert the new event into the relevent data structures
         match event {
             UnitEvent::Category(ref cat) => {
-                if ! self.category_status.contains_key(cat.kind()) {
-                    new_items = new_items + 1;
-                }
                 self.category_status.insert(cat.kind().clone(), cat.status().clone());
             },
             UnitEvent::Status(ref stat) => {
                 if ! self.category_status.contains_key(&stat.kind()) {
                     self.category_status.insert(stat.kind().clone(), "".to_owned());
-                    new_items = new_items + 1;
                 }
                 // If this event is for a brand-new unit kind, ensure there is an
                 // entry in the unit status map for it.
@@ -88,7 +82,7 @@ impl TerminalInterface {
 
         match self.output_type {
             TerminalOutputType::Plain => self.draw_event(event),
-            TerminalOutputType::Fancy => self.redraw_screen(event, new_items),
+            TerminalOutputType::Fancy => self.redraw_screen(event),
             TerminalOutputType::None => (),
         };
     }
@@ -100,20 +94,32 @@ impl TerminalInterface {
         };
     }
 
-    fn redraw_screen(&mut self, event: UnitEvent, new_items: u32) {
-        /*
-        // Clear out the previous entries, plus the headers for the field types.
-        self.terminal.clear_last_lines(self.unit_status.len() + 3).expect("Unable to clear lines");
+    fn redraw_screen(&mut self, _: UnitEvent) {
 
-        self.terminal.write_line(format!("{}", console::style("Jigs:").bold()).as_str()).expect("Unable to write jig header");
+        // Clear out the previous entries, plus the headers for the field types.
+        self.terminal.clear_last_lines(self.last_line_count).expect("Unable to clear lines");
+        let mut line_count = 0;
+
+        for (category_type, category_status) in &self.category_status {
+            self.terminal.write_line(format!("{}: {}",
+                                             console::style(category_type).bold(),
+                                             console::style(category_status).bold()).as_str())
+                                        .expect("Unable to write jig header");
+            line_count = line_count + 1;
+
+            for (unit_name, unit_event) in self.unit_status.get(&category_type).expect("Couldn't find any category bucket").iter() {
+                line_count = line_count + 1;
+                self.terminal.write_line(format!("    {}: {}",
+                                                console::style(unit_name).green(),
+                                                console::style(unit_event).yellow())
+                    .as_str()).expect("Unable to write jig");
+            }
+        }
+        /*
         for (event_name, event) in &self.unit_status {
             if event_name.kind() != &unitloader::UnitKind::Jig {
                 continue;
             }
-            self.terminal.write_line(format!("    {}: {}",
-                                             console::style(event_name).green(),
-                                             console::style(event).yellow())
-                .as_str()).expect("Unable to write jig");
         }
 
         self.terminal.write_line(format!("{}", console::style("Scenarios:").bold()).as_str()).expect("Unable to write scenario header");
@@ -138,5 +144,6 @@ impl TerminalInterface {
                 .as_str()).expect("Unable to write test");
         }
         */
+        self.last_line_count = line_count;
     }
 }
