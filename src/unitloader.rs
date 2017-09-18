@@ -108,13 +108,45 @@ impl fmt::Display for UnitStatus {
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub struct UnitStatusEvent {
-    pub name: UnitName,
-    pub status: UnitStatus,
+    name: UnitName,
+    status: UnitStatus,
+}
+
+impl UnitStatusEvent {
+    pub fn name(&self) -> &UnitName {
+        &self.name
+    }
+    pub fn status(&self) -> &UnitStatus {
+        &self.status
+    }
+    pub fn kind(&self) -> &UnitKind {
+        &self.name.kind
+    }
+}
+
+#[derive(PartialEq, Eq, Hash, Debug, Clone)]
+pub struct UnitCategoryEvent {
+    pub kind: UnitKind,
+    pub status: String,
+}
+impl UnitCategoryEvent {
+    pub fn kind(&self) -> &UnitKind {
+        &self.kind
+    }
+    pub fn status(&self) -> &String {
+        &self.status
+    }
+}
+
+#[derive(PartialEq, Eq, Hash, Debug, Clone)]
+pub enum UnitEvent {
+    Status(UnitStatusEvent),
+    Category(UnitCategoryEvent),
 }
 
 pub struct UnitLoader {
     paths: Vec<PathBuf>,
-    senders: Arc<Mutex<Vec<Sender<UnitStatusEvent>>>>,
+    senders: Arc<Mutex<Vec<Sender<UnitEvent>>>>,
     watcher: RecommendedWatcher,
 }
 
@@ -137,28 +169,28 @@ impl UnitLoader {
                     Ok(event) => {
                         let status_event = match event {
                             notify::DebouncedEvent::Create(path) => {
-                                UnitStatusEvent {
+                                UnitEvent::Status(UnitStatusEvent {
                                     name: Self::file_to_unit_name(&path).unwrap(),
                                     status: UnitStatus::Added,
-                                }
+                                })
                             }
                             notify::DebouncedEvent::Write(path) => {
-                                UnitStatusEvent {
+                                UnitEvent::Status(UnitStatusEvent {
                                     name: Self::file_to_unit_name(&path).unwrap(),
                                     status: UnitStatus::Updated,
-                                }
+                                })
                             }
                             notify::DebouncedEvent::Remove(path) => {
-                                UnitStatusEvent {
+                                UnitEvent::Status(UnitStatusEvent {
                                     name: Self::file_to_unit_name(&path).unwrap(),
                                     status: UnitStatus::Deleted,
-                                }
+                                })
                             }
                             _ => continue,
                         };
 
                         for sender in notify_senders.lock().unwrap().iter() {
-                            let ref other_sender: Sender<UnitStatusEvent> = *sender;
+                            let ref other_sender: Sender<UnitEvent> = *sender;
                             sender.send(status_event.clone()).expect("One of the senders stopped responding.  Exiting!");
                         }
                     }
@@ -174,7 +206,7 @@ impl UnitLoader {
         }
     }
 
-    pub fn subscribe(&mut self) -> Receiver<UnitStatusEvent> {
+    pub fn subscribe(&mut self) -> Receiver<UnitEvent> {
         let (sender, receiver) = channel();
         self.senders.lock().unwrap().push(sender);
         receiver
@@ -182,10 +214,10 @@ impl UnitLoader {
 
     fn add_unit(&self, unit_name: UnitName) {
         for sender in self.senders.lock().unwrap().iter() {
-            sender.send(UnitStatusEvent {
+            sender.send(UnitEvent::Status(UnitStatusEvent {
                 name: unit_name.clone(),
                 status: UnitStatus::Added,
-            }).expect("Failed to send notification to adding a unit.  Aborting.");
+            })).expect("Failed to send notification to adding a unit.  Aborting.");
         }
     }
 
