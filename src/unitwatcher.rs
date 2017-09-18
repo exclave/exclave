@@ -10,14 +10,14 @@ use unitbroadcaster::*;
 
 use self::notify::{RecommendedWatcher, Watcher, RecursiveMode};
 
-pub struct UnitLoader {
+pub struct UnitWatcher {
     paths: Vec<PathBuf>,
     watcher: RecommendedWatcher,
     broadcaster: UnitBroadcaster,
 }
 
-impl UnitLoader {
-    pub fn new(broadcaster: &UnitBroadcaster) -> UnitLoader {
+impl UnitWatcher {
+    pub fn new(broadcaster: &UnitBroadcaster) -> UnitWatcher {
         let (watcher_tx, watcher_rx) = channel();
 
         // Automatically select the best implementation for your platform.
@@ -63,7 +63,7 @@ impl UnitLoader {
             }
         });
 
-        UnitLoader {
+        UnitWatcher {
             paths: vec![],
             broadcaster: broadcaster.clone(),
             watcher: watcher,

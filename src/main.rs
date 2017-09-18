@@ -2,19 +2,33 @@ extern crate ctrlc;
 extern crate clap;
 
 mod unitbroadcaster;
-mod unitloader;
+mod unitwatcher;
 mod terminal;
+
+use unitbroadcaster::{UnitEvent, UnitBroadcaster};
+use unitwatcher::UnitWatcher;
 
 use clap::{Arg, App};
 
+fn main_loop(unit_broadcaster: &UnitBroadcaster) {
+    let rx = unit_broadcaster.subscribe();
+    while let Ok(msg) = rx.recv() {
+        match msg {
+            UnitEvent::Shutdown => return,
+            UnitEvent::Status(_) => (),
+            UnitEvent::Category(_) => (),
+        }
+    }
+}
+
 fn main() {
-    let unit_broadcaster = unitbroadcaster::UnitBroadcaster::new();
+    let unit_broadcaster = UnitBroadcaster::new();
 
     // The signal handler must come first, so that the same mask gets
     // applied to all threads.
     let ctrl_c_broadcaster = unit_broadcaster.clone();
     ctrlc::set_handler(move || {
-            ctrl_c_broadcaster.broadcast(&unitbroadcaster::UnitEvent::Shutdown);
+            ctrl_c_broadcaster.broadcast(&UnitEvent::Shutdown);
         })
         .expect("Error setting Ctrl-C handler");
 
@@ -36,7 +50,7 @@ fn main() {
             .long("plain-output")
             .help("Force output to be 'plain' (rather than auto-detected)"))
         .arg(Arg::with_name("QUIET")
-            .short("a")
+            .short("q")
             .long("no-output")
             .help("Prevent console output entirely"))
         .get_matches();
@@ -50,7 +64,7 @@ fn main() {
         None
     };
 
-    let mut unit_loader = unitloader::UnitLoader::new(&unit_broadcaster);
+    let mut unit_loader = UnitWatcher::new(&unit_broadcaster);
 
     terminal::TerminalInterface::start(output_type, unit_broadcaster.subscribe());
 
@@ -58,11 +72,5 @@ fn main() {
         unit_loader.add_path(config_dir).expect("Unable to add config directory");
     }
 
-    // Wait for Control-C to be pressed.
-    let rx = unit_broadcaster.subscribe();
-    while let Ok(msg) = rx.recv() {
-        if msg == unitbroadcaster::UnitEvent::Shutdown {
-            break;
-        }
-    }
+    main_loop(&unit_broadcaster);
 }
