@@ -169,6 +169,7 @@ impl UnitLoader {
             loop {
                 match watcher_rx.recv() {
                     Ok(event) => {
+                        // Convert the DebouncedEvent into a UnitEvent
                         let status_event = match event {
                             notify::DebouncedEvent::Create(path) => {
                                 UnitEvent::Status(UnitStatusEvent {
@@ -192,12 +193,7 @@ impl UnitLoader {
                         };
 
                         // Send a copy of the message to each of the listeners.
-                        let notify_senders_ref = notify_senders.lock().unwrap();
-                        use std::slice::Iter;
-                        let notify_senders_iter: Iter<Sender<UnitEvent>> = notify_senders_ref.iter();
-                        for sender in notify_senders_iter {
-                            sender.send(status_event.clone()).expect("One of the senders stopped responding.  Exiting!");
-                        }
+                        Self::broadcast_core(&notify_senders, &status_event);
                     }
                     Err(e) => println!("watch error: {:?}", e),
                 }
@@ -209,6 +205,29 @@ impl UnitLoader {
             senders: senders,
             watcher: watcher,
         }
+    }
+
+    fn broadcast_core(senders: &Arc<Mutex<Vec<Sender<UnitEvent>>>>, event: &UnitEvent) {
+        let mut to_remove = None;
+        // Send a copy of the message to each of the listeners.
+        let mut notify_senders_ref = senders.lock().unwrap();
+        {
+            for (idx, sender) in notify_senders_ref.iter().enumerate() {
+                if let Err(e) = sender.send(event.clone()) {
+                    eprintln!("Sender {} stopped responding: {:?}, removing it.", idx, e);
+                    to_remove = Some(idx);
+                }
+            }
+        }
+
+        // If a sender threw an error, simply remove it from the list of elements to update
+        if let Some(idx) = to_remove {
+            notify_senders_ref.remove(idx);
+        }
+    }
+
+    pub fn broadcast(&mut self, event: &UnitEvent) {
+        Self::broadcast_core(&self.senders, event)
     }
 
     pub fn subscribe(&mut self) -> Receiver<UnitEvent> {
