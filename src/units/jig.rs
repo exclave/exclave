@@ -38,11 +38,25 @@ impl fmt::Display for JigIncompatibleReason {
 impl From<RunnyError> for JigIncompatibleReason {
     fn from(error: RunnyError) -> Self {
         match error {
-            RunnyError::NoCommandSpecified => JigIncompatibleReason::TestProgramFailed("No command specified".to_owned()),
-            RunnyError::RunnyIoError(ref e) => JigIncompatibleReason::TestProgramFailed(format!("Error running test program: {}", e)),
+            RunnyError::NoCommandSpecified => {
+                JigIncompatibleReason::TestProgramFailed("No command specified".to_owned())
+            }
+            RunnyError::RunnyIoError(ref e) => {
+                JigIncompatibleReason::TestProgramFailed(format!("Error running test program: {}",
+                                                                 e))
+            }
         }
     }
 }
+
+pub struct JigError {}
+impl fmt::Display for JigError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Jig Error")
+    }
+}
+
+pub struct Jig {}
 
 pub enum JigDescriptionError {
     InvalidUnitName,
@@ -77,7 +91,6 @@ impl fmt::Display for JigDescriptionError {
         }
     }
 }
-
 
 /// A struct defining an in-memory representation of a .jig file
 pub struct JigDescription {
@@ -173,8 +186,7 @@ impl JigDescription {
         if let Some(ref cmd_str) = self.test_program {
             use std::io::{BufRead, BufReader};
 
-            let running = Runny::new(cmd_str)
-                .directory(&Some(config.working_directory().clone()))
+            let running = Runny::new(cmd_str).directory(&Some(config.working_directory().clone()))
                 .timeout(config.timeout().clone())
                 .path(config.paths().clone())
                 .start()?;
@@ -191,6 +203,24 @@ impl JigDescription {
                 return Err(JigIncompatibleReason::TestProgramReturnedNonzero(result, buf));
             }
         }
+        Ok(())
+    }
+
+    pub fn select(&self) -> Jig {
+        Jig::new(self)
+    }
+}
+
+impl Jig {
+    pub fn new(_: &JigDescription) -> Jig {
+        Jig {}
+    }
+
+    pub fn activate(&self) -> Result<(), JigError> {
+        Ok(())
+    }
+
+    pub fn deactivate(&self) -> Result<(), JigError> {
         Ok(())
     }
 }

@@ -31,6 +31,9 @@ pub enum UnitStatus {
     /// The unit is currently in use
     UnitActive,
 
+    /// We tried to activate, but failed to do so
+    UnitActivationFailed(String /* reason */),
+
     /// The unit was active, then stopped being active due to finishing successfully
     UnitDeactivatedSuccessfully(String /* reason */),
 
@@ -55,6 +58,9 @@ impl fmt::Display for UnitStatus {
             &UnitStatus::UnitSelected => write!(f, "Selected"),
             &UnitStatus::UnitDeselected => write!(f, "Deselected"),
             &UnitStatus::UnitActive => write!(f, "Active"),
+            &UnitStatus::UnitActivationFailed(ref reason) => {
+                write!(f, "Activation failed: {}", reason)
+            }
             &UnitStatus::UnitDeactivatedSuccessfully(ref x) => {
                 write!(f, "Deactivated successfully: {}", x)
             }
@@ -117,6 +123,12 @@ impl UnitStatusEvent {
         })
     }
 
+    pub fn new_selected(name: &UnitName) -> UnitStatusEvent {
+        UnitStatusEvent {
+            name: name.clone(),
+            status: UnitStatus::UnitSelected,
+        }
+    }
     pub fn new_load_started(name: &UnitName) -> UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
@@ -128,6 +140,20 @@ impl UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
             status: UnitStatus::LoadFailed(msg),
+        }
+    }
+
+    pub fn new_unit_active(name: &UnitName) -> UnitStatusEvent {
+        UnitStatusEvent {
+            name: name.clone(),
+            status: UnitStatus::UnitActive,
+        }
+    }
+
+    pub fn new_unit_active_failed(name: &UnitName, msg: String) -> UnitStatusEvent {
+        UnitStatusEvent {
+            name: name.clone(),
+            status: UnitStatus::UnitActivationFailed(msg),
         }
     }
 
@@ -155,11 +181,17 @@ pub type UnitCategoryStatus = String;
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub struct UnitCategoryEvent {
-    pub kind: UnitKind,
-    pub status: UnitCategoryStatus,
+    kind: UnitKind,
+    status: UnitCategoryStatus,
 }
 
 impl UnitCategoryEvent {
+    pub fn new(kind: UnitKind, status: &UnitCategoryStatus) -> Self {
+        UnitCategoryEvent {
+            kind: kind,
+            status: status.clone(),
+        }
+    }
     pub fn kind(&self) -> &UnitKind {
         &self.kind
     }
