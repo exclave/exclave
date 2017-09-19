@@ -1,54 +1,17 @@
 extern crate systemd_parser;
 extern crate runny;
 
-use unit::{UnitName, UnitSelectError, UnitActivateError, UnitDeactivateError, UnitIncompatibleReason};
+use unit::{UnitName, UnitSelectError, UnitActivateError, UnitDeactivateError, UnitIncompatibleReason, UnitDescriptionError};
 use std::path::Path;
-use std::io;
 use std::io::Read;
 use std::fs::File;
-use std::fmt;
 
 use self::systemd_parser::items::DirectiveEntry;
-use self::systemd_parser::errors::ParserError;
-use self::runny::{Runny, RunnyError};
+use self::runny::Runny;
 use config::Config;
 
 pub struct Jig {
     name: UnitName,
-}
-
-pub enum JigDescriptionError {
-    InvalidUnitName,
-    MissingJigSection,
-    FileOpenError(io::Error),
-    ParseError(ParserError),
-}
-
-impl From<io::Error> for JigDescriptionError {
-    fn from(error: io::Error) -> Self {
-        JigDescriptionError::FileOpenError(error)
-    }
-}
-
-impl From<self::systemd_parser::errors::ParserError> for JigDescriptionError {
-    fn from(error: self::systemd_parser::errors::ParserError) -> Self {
-        JigDescriptionError::ParseError(error)
-    }
-}
-
-impl fmt::Display for JigDescriptionError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &JigDescriptionError::InvalidUnitName => write!(f, "Invalid jig unit name"),
-            &JigDescriptionError::MissingJigSection => write!(f, "Missing [Jig] section"),
-            &JigDescriptionError::FileOpenError(ref e) => {
-                write!(f, "Unable to open .jig file: {}", e)
-            }
-            &JigDescriptionError::ParseError(ref e) => {
-                write!(f, "Parse error reading .jig file: {}", e)
-            }
-        }
-    }
 }
 
 /// A struct defining an in-memory representation of a .jig file
@@ -76,10 +39,10 @@ pub struct JigDescription {
 }
 
 impl JigDescription {
-    pub fn from_path(path: &Path) -> Result<JigDescription, JigDescriptionError> {
+    pub fn from_path(path: &Path) -> Result<JigDescription, UnitDescriptionError> {
         let unit_name = match UnitName::from_path(path) {
             Some(name) => name,
-            None => return Err(JigDescriptionError::InvalidUnitName),
+            None => return Err(UnitDescriptionError::InvalidUnitName),
         };
 
         // Parse the file into a systemd unit_file object
@@ -88,7 +51,7 @@ impl JigDescription {
         let unit_file = systemd_parser::parse_string(&contents)?;
 
         if !unit_file.has_category("Jig") {
-            return Err(JigDescriptionError::MissingJigSection);
+            return Err(UnitDescriptionError::MissingSection("Jig".to_owned()));
         }
 
         let mut jig_description = JigDescription {

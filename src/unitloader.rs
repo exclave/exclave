@@ -8,6 +8,7 @@ use config::Config;
 use unit::{UnitName, UnitKind};
 use unitbroadcaster::{UnitBroadcaster, UnitEvent, UnitStatus, UnitStatusEvent, UnitCategoryEvent};
 use units::jig::{JigDescription, Jig};
+use units::test::{TestDescription, Test};
 
 pub struct UnitLoader {
     broadcaster: UnitBroadcaster,
@@ -80,12 +81,21 @@ impl UnitLoader {
                 };
                 self.jigs.borrow_mut().insert(name.clone(), Arc::new(Mutex::new(new_jig)));
 
-                /// Notify everyone this unit has been selected.
+                // Notify everyone this unit has been selected.
                 self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected(name)));
 
                 self.broadcaster.broadcast(&UnitEvent::Category(UnitCategoryEvent::new(UnitKind::Jig, &format!("Number of units loaded: {}", self.jigs.borrow().len()))));
             }
-            &UnitKind::Test => {}
+            &UnitKind::Test => {
+                // Ensure the jig is valid, has valid syntax, and can be loaded
+                let test_description = match TestDescription::from_path(path) {
+                    Err(e) => {
+                        self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_failed(name, format!("{}", e))));
+                        return;
+                    }
+                    Ok(o) => o,
+                };
+            }
             _ => {}
         }
     }

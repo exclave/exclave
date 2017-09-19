@@ -1,8 +1,13 @@
+extern crate systemd_parser;
 extern crate runny;
+extern crate regex;
 
 use std::fmt;
 use std::path::Path;
+use std::io;
+
 use self::runny::RunnyError;
+use self::systemd_parser::errors::ParserError;
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone, PartialOrd, Ord)]
 pub enum UnitKind {
@@ -102,7 +107,7 @@ impl From<RunnyError> for UnitIncompatibleReason {
             }
             RunnyError::RunnyIoError(ref e) => {
                 UnitIncompatibleReason::TestProgramFailed(format!("Error running test program: {}",
-                                                                 e))
+                                                                  e))
             }
         }
     }
@@ -141,5 +146,60 @@ pub enum UnitDeactivateError {
 impl fmt::Display for UnitDeactivateError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Unable to deactivate unit")
+    }
+}
+
+pub enum UnitDescriptionError {
+    InvalidUnitName,
+    MissingSection(String /* section name */),
+    FileOpenError(io::Error),
+    ParseError(ParserError),
+    RegexError(self::regex::Error),
+    InvalidValue(String, // Section name
+                 String, // Key name
+                 String, // Specified value
+                 Vec<String> /* Allowed values */),
+}
+
+impl From<io::Error> for UnitDescriptionError {
+    fn from(error: io::Error) -> Self {
+        UnitDescriptionError::FileOpenError(error)
+    }
+}
+
+impl From<self::systemd_parser::errors::ParserError> for UnitDescriptionError {
+    fn from(error: self::systemd_parser::errors::ParserError) -> Self {
+        UnitDescriptionError::ParseError(error)
+    }
+}
+
+impl From<self::regex::Error> for UnitDescriptionError {
+    fn from(error: self::regex::Error) -> Self {
+        UnitDescriptionError::RegexError(error)
+    }
+}
+
+impl fmt::Display for UnitDescriptionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use std::error::Error;
+        match self {
+            &UnitDescriptionError::InvalidUnitName => write!(f, "Invalid jig unit name"),
+            &UnitDescriptionError::MissingSection(ref sec) => {
+                write!(f, "Missing [{}] section", sec)
+            }
+            &UnitDescriptionError::FileOpenError(ref e) => write!(f, "Unable to open file: {}", e.description()),
+            &UnitDescriptionError::ParseError(ref e) => {
+                write!(f, "Syntax error: {}", e.description())
+            }
+            &UnitDescriptionError::RegexError(ref e) => write!(f, "Unable to parse regex: {}", e),
+            &UnitDescriptionError::InvalidValue(ref sec, ref key, ref val, ref allowed) => {
+                write!(f,
+                       "Key {} in section {} has invalid value: {}.  Value must be one of: {}",
+                       key,
+                       sec,
+                       val,
+                       allowed.join(","))
+            }
+        }
     }
 }
