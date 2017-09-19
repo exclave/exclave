@@ -20,25 +20,28 @@ pub enum UnitStatus {
     LoadFailed(String /* reason */),
 
     /// The unit file reported that it was not compatible
-    UnitIncompatible(String /* reason */),
+    Incompatible(String /* reason */),
 
     /// The unit has been selected, and may be made active later on.
-    UnitSelected,
+    Selected,
+
+    /// We tried to select a unit, but couldn't for some reason
+    SelectFailed(String /* reason */),
 
     /// The unit has been deselected (but is still loaded, and may be selected later)
-    UnitDeselected,
+    Deselected,
 
     /// The unit is currently in use
-    UnitActive,
+    Active,
 
     /// We tried to activate, but failed to do so
-    UnitActivationFailed(String /* reason */),
+    ActivationFailed(String /* reason */),
 
     /// The unit was active, then stopped being active due to finishing successfully
-    UnitDeactivatedSuccessfully(String /* reason */),
+    DeactivatedSuccessfully(String /* reason */),
 
     /// The unit was active, then stopped being active due to finishing unsuccessfully
-    UnitDeactivatedUnsuccessfully(String /* reason */),
+    DeactivatedUnsuccessfully(String /* reason */),
 
     /// The unit successfully loaded, but is being update (or removed)
     UnloadStarted,
@@ -54,17 +57,16 @@ impl fmt::Display for UnitStatus {
             &UnitStatus::Updated(ref path) => write!(f, "Updated {}", path.to_string_lossy()),
             &UnitStatus::LoadStarted => write!(f, "Load started"),
             &UnitStatus::LoadFailed(ref x) => write!(f, "Load failed: {}", x),
-            &UnitStatus::UnitIncompatible(ref x) => write!(f, "Incompatible: {}", x),
-            &UnitStatus::UnitSelected => write!(f, "Selected"),
-            &UnitStatus::UnitDeselected => write!(f, "Deselected"),
-            &UnitStatus::UnitActive => write!(f, "Active"),
-            &UnitStatus::UnitActivationFailed(ref reason) => {
-                write!(f, "Activation failed: {}", reason)
-            }
-            &UnitStatus::UnitDeactivatedSuccessfully(ref x) => {
+            &UnitStatus::Incompatible(ref x) => write!(f, "Incompatible: {}", x),
+            &UnitStatus::SelectFailed(ref x) => write!(f, "Select failed: {}", x),
+            &UnitStatus::Selected => write!(f, "Selected"),
+            &UnitStatus::Deselected => write!(f, "Deselected"),
+            &UnitStatus::Active => write!(f, "Active"),
+            &UnitStatus::ActivationFailed(ref reason) => write!(f, "Activation failed: {}", reason),
+            &UnitStatus::DeactivatedSuccessfully(ref x) => {
                 write!(f, "Deactivated successfully: {}", x)
             }
-            &UnitStatus::UnitDeactivatedUnsuccessfully(ref x) => {
+            &UnitStatus::DeactivatedUnsuccessfully(ref x) => {
                 write!(f, "Deactivated unsuccessfilly: {}", x)
             }
             &UnitStatus::UnloadStarted => write!(f, "Unloading"),
@@ -126,13 +128,20 @@ impl UnitStatusEvent {
     pub fn new_selected(name: &UnitName) -> UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
-            status: UnitStatus::UnitSelected,
+            status: UnitStatus::Selected,
         }
     }
     pub fn new_load_started(name: &UnitName) -> UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
             status: UnitStatus::LoadStarted,
+        }
+    }
+
+    pub fn new_select_failed(name: &UnitName, msg: String) -> UnitStatusEvent {
+        UnitStatusEvent {
+            name: name.clone(),
+            status: UnitStatus::SelectFailed(msg),
         }
     }
 
@@ -146,21 +155,21 @@ impl UnitStatusEvent {
     pub fn new_unit_active(name: &UnitName) -> UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
-            status: UnitStatus::UnitActive,
+            status: UnitStatus::Active,
         }
     }
 
     pub fn new_unit_active_failed(name: &UnitName, msg: String) -> UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
-            status: UnitStatus::UnitActivationFailed(msg),
+            status: UnitStatus::ActivationFailed(msg),
         }
     }
 
     pub fn new_unit_incompatible(name: &UnitName, msg: String) -> UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
-            status: UnitStatus::UnitIncompatible(msg),
+            status: UnitStatus::Incompatible(msg),
         }
     }
 

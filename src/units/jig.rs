@@ -1,7 +1,7 @@
 extern crate systemd_parser;
 extern crate runny;
 
-use unit::UnitName;
+use unit::{UnitName, UnitSelectError, UnitActivateError, UnitDeactivateError, UnitIncompatibleReason};
 use std::path::Path;
 use std::io;
 use std::io::Read;
@@ -13,50 +13,9 @@ use self::systemd_parser::errors::ParserError;
 use self::runny::{Runny, RunnyError};
 use config::Config;
 
-pub enum JigIncompatibleReason {
-    TestProgramReturnedNonzero(i32, String),
-    TestProgramFailed(String),
-    TestFileNotPresent(String),
+pub struct Jig {
+    name: UnitName,
 }
-
-impl fmt::Display for JigIncompatibleReason {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &JigIncompatibleReason::TestProgramFailed(ref program_name) => {
-                write!(f, "Test program {} failed", program_name)
-            }
-            &JigIncompatibleReason::TestProgramReturnedNonzero(val, ref program_name) => {
-                write!(f, "Test program {} returned {}", program_name, val)
-            }
-            &JigIncompatibleReason::TestFileNotPresent(ref file_name) => {
-                write!(f, "Test file {} not present", file_name)
-            }
-        }
-    }
-}
-
-impl From<RunnyError> for JigIncompatibleReason {
-    fn from(error: RunnyError) -> Self {
-        match error {
-            RunnyError::NoCommandSpecified => {
-                JigIncompatibleReason::TestProgramFailed("No command specified".to_owned())
-            }
-            RunnyError::RunnyIoError(ref e) => {
-                JigIncompatibleReason::TestProgramFailed(format!("Error running test program: {}",
-                                                                 e))
-            }
-        }
-    }
-}
-
-pub struct JigError {}
-impl fmt::Display for JigError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Jig Error")
-    }
-}
-
-pub struct Jig {}
 
 pub enum JigDescriptionError {
     InvalidUnitName,
@@ -173,12 +132,12 @@ impl JigDescription {
 
     /// Determine if a unit is compatible with this system.
     /// Returns Ok(()) if it is, and Err(String) if not.
-    pub fn is_compatible(&self, config: &Config) -> Result<(), JigIncompatibleReason> {
+    pub fn is_compatible(&self, config: &Config) -> Result<(), UnitIncompatibleReason> {
 
         // If this Jig has a file-existence test, run it.
         if let Some(ref test_file) = self.test_file {
             if !Path::new(&test_file).exists() {
-                return Err(JigIncompatibleReason::TestFileNotPresent(test_file.clone()));
+                return Err(UnitIncompatibleReason::TestFileNotPresent(test_file.clone()));
             }
         }
 
@@ -200,27 +159,35 @@ impl JigDescription {
             }
             let result = reader.get_ref().result();
             if result != 0 {
-                return Err(JigIncompatibleReason::TestProgramReturnedNonzero(result, buf));
+                return Err(UnitIncompatibleReason::TestProgramReturnedNonzero(result, buf));
             }
         }
         Ok(())
     }
 
-    pub fn select(&self) -> Jig {
+    pub fn select(&self) -> Result<Jig, UnitSelectError> {
         Jig::new(self)
     }
 }
 
 impl Jig {
-    pub fn new(_: &JigDescription) -> Jig {
-        Jig {}
+    pub fn new(desc: &JigDescription) -> Result<Jig, UnitSelectError> {
+        Ok(Jig {
+            name: desc.id.clone(),
+        })
     }
 
-    pub fn activate(&self) -> Result<(), JigError> {
+    pub fn activate(&self) -> Result<(), UnitActivateError> {
         Ok(())
     }
 
-    pub fn deactivate(&self) -> Result<(), JigError> {
+    pub fn deactivate(&self) -> Result<(), UnitDeactivateError> {
         Ok(())
+    }
+}
+
+impl Drop for Jig {
+    fn drop(&mut self) {
+        println!("Dropping {}", self.name);
     }
 }

@@ -52,31 +52,41 @@ impl UnitLoader {
         self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_started(name)));
 
         // For now, we only support testing Jig
-        if name.kind() == &UnitKind::Jig {
+        match name.kind() {
+            &UnitKind::Jig => {
 
-            // Ensure the jig is valid, has valid syntax, and can be loaded
-            let jig_description = match JigDescription::from_path(path) {
-                Err(e) => {
-                    self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_failed(name, format!("{}", e))));
+                // Ensure the jig is valid, has valid syntax, and can be loaded
+                let jig_description = match JigDescription::from_path(path) {
+                    Err(e) => {
+                        self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_failed(name, format!("{}", e))));
+                        return;
+                    }
+                    Ok(o) => o,
+                };
+
+                // Check to see if the jig is compatible with this platform
+                if let Err(e) = jig_description.is_compatible(&*self.config.lock().unwrap()) {
+                    self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_unit_incompatible(name, format!("{}", e))));
                     return;
                 }
-                Ok(o) => o,
-            };
 
-            // Check to see if the jig is compatible with this platform
-            if let Err(e) = jig_description.is_compatible(&*self.config.lock().unwrap()) {
-                self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_unit_incompatible(name, format!("{}", e))));
-                return;
+                // "Select" the Jig, which means we can activate it later on.
+                let new_jig = match jig_description.select() {
+                    Ok(o) => o,
+                    Err(e) => {
+                        self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_select_failed(name, format!("{}", e))));
+                        return;
+                    }
+                };
+                self.jigs.borrow_mut().insert(name.clone(), Arc::new(Mutex::new(new_jig)));
+
+                /// Notify everyone this unit has been selected.
+                self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected(name)));
+
+                self.broadcaster.broadcast(&UnitEvent::Category(UnitCategoryEvent::new(UnitKind::Jig, &format!("Number of units loaded: {}", self.jigs.borrow().len()))));
             }
-
-            // "Select" the Jig, which means we can activate it later on.
-            let new_jig = jig_description.select();
-            self.jigs.borrow_mut().insert(name.clone(), Arc::new(Mutex::new(new_jig)));
-
-            /// Notify everyone this unit has been selected.
-            self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected(name)));
-
-            self.broadcaster.broadcast(&UnitEvent::Category(UnitCategoryEvent::new(UnitKind::Jig, &format!("Number of units loaded: {}", self.jigs.borrow().len()))));
+            &UnitKind::Test => {}
+            _ => {}
         }
     }
 
