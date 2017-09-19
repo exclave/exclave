@@ -57,7 +57,7 @@ impl UnitLoader {
                 Ok(o) => o,
             };
 
-            if let Err(e) = jig_description.is_compatible() {
+            if let Err(e) = jig_description.is_compatible(&*self.config.lock().unwrap()) {
                 self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_unit_incompatible(name, format!("{}", e))));
                 return;
             }

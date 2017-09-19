@@ -1,4 +1,5 @@
 extern crate systemd_parser;
+extern crate runny;
 
 use unit::UnitName;
 use std::path::Path;
@@ -6,11 +7,14 @@ use std::io;
 use std::io::Read;
 use std::fs::File;
 use std::fmt;
+
 use self::systemd_parser::items::DirectiveEntry;
 use self::systemd_parser::errors::ParserError;
+use self::runny::{Runny, RunnyError};
+use config::Config;
 
 pub enum JigIncompatibleReason {
-    TestProgramReturnedNonzero(String, i32),
+    TestProgramReturnedNonzero(i32, String),
     TestProgramFailed(String),
     TestFileNotPresent(String),
 }
@@ -18,9 +22,24 @@ pub enum JigIncompatibleReason {
 impl fmt::Display for JigIncompatibleReason {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            &JigIncompatibleReason::TestProgramFailed(ref program_name) => write!(f, "Test program {} failed", program_name),
-            &JigIncompatibleReason::TestProgramReturnedNonzero(ref program_name, val) => write!(f, "Test program {} returned {}", program_name, val),
-            &JigIncompatibleReason::TestFileNotPresent(ref file_name) => write!(f, "Test file {} not present", file_name),
+            &JigIncompatibleReason::TestProgramFailed(ref program_name) => {
+                write!(f, "Test program {} failed", program_name)
+            }
+            &JigIncompatibleReason::TestProgramReturnedNonzero(val, ref program_name) => {
+                write!(f, "Test program {} returned {}", program_name, val)
+            }
+            &JigIncompatibleReason::TestFileNotPresent(ref file_name) => {
+                write!(f, "Test file {} not present", file_name)
+            }
+        }
+    }
+}
+
+impl From<RunnyError> for JigIncompatibleReason {
+    fn from(error: RunnyError) -> Self {
+        match error {
+            RunnyError::NoCommandSpecified => JigIncompatibleReason::TestProgramFailed("No command specified".to_owned()),
+            RunnyError::RunnyIoError(ref e) => JigIncompatibleReason::TestProgramFailed(format!("Error running test program: {}", e)),
         }
     }
 }
@@ -141,10 +160,35 @@ impl JigDescription {
 
     /// Determine if a unit is compatible with this system.
     /// Returns Ok(()) if it is, and Err(String) if not.
-    pub fn is_compatible(&self) -> Result<(), JigIncompatibleReason> {
+    pub fn is_compatible(&self, config: &Config) -> Result<(), JigIncompatibleReason> {
+
+        // If this Jig has a file-existence test, run it.
         if let Some(ref test_file) = self.test_file {
             if !Path::new(&test_file).exists() {
                 return Err(JigIncompatibleReason::TestFileNotPresent(test_file.clone()));
+            }
+        }
+
+        // If this Jig has a test-program, run that program and check the output.
+        if let Some(ref cmd_str) = self.test_program {
+            use std::io::{BufRead, BufReader};
+
+            let running = Runny::new(cmd_str)
+                .directory(&Some(config.working_directory().clone()))
+                .timeout(config.timeout().clone())
+                .path(config.paths().clone())
+                .start()?;
+
+            let mut reader = BufReader::new(running);
+            let mut buf = String::new();
+            loop {
+                if let Err(_) = reader.read_line(&mut buf) {
+                    break;
+                }
+            }
+            let result = reader.get_ref().result();
+            if result != 0 {
+                return Err(JigIncompatibleReason::TestProgramReturnedNonzero(result, buf));
             }
         }
         Ok(())
