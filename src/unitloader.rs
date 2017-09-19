@@ -1,20 +1,24 @@
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
+use std::sync::{Arc, Mutex};
 
+use config::Config;
 use unit::{UnitName, UnitKind};
 use unitbroadcaster::{UnitBroadcaster, UnitEvent, UnitStatus, UnitStatusEvent};
-use units::jig::{JigDescription, JigDescriptionError};
+use units::jig::JigDescription;
 
 pub struct UnitLoader {
     broadcaster: UnitBroadcaster,
     receiver: Receiver<UnitEvent>,
+    config: Arc<Mutex<Config>>,
 }
 
 impl UnitLoader {
-    pub fn new(broadcaster: &UnitBroadcaster) -> Self {
+    pub fn new(broadcaster: &UnitBroadcaster, config: &Arc<Mutex<Config>>) -> Self {
         UnitLoader {
             broadcaster: broadcaster.clone(),
             receiver: broadcaster.subscribe(),
+            config: config.clone(),
         }
     }
 

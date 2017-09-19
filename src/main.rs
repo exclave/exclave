@@ -1,12 +1,15 @@
 extern crate ctrlc;
 extern crate clap;
 
+use std::sync::{Arc, Mutex};
+
 mod unit;
 mod units;
 mod unitbroadcaster;
 mod unitloader;
 mod unitwatcher;
 mod terminal;
+mod config;
 
 use unitbroadcaster::{UnitEvent, UnitBroadcaster};
 use unitwatcher::UnitWatcher;
@@ -15,8 +18,10 @@ use unitloader::UnitLoader;
 use clap::{Arg, App};
 
 fn main() {
+    let config = Arc::new(Mutex::new(config::Config::new()));
+
     let unit_broadcaster = UnitBroadcaster::new();
-    let unit_loader = UnitLoader::new(&unit_broadcaster);
+    let unit_loader = UnitLoader::new(&unit_broadcaster, &config);
 
     // The signal handler must come first, so that the same mask gets
     // applied to all threads.
