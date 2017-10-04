@@ -1,14 +1,16 @@
 extern crate systemd_parser;
 extern crate runny;
 
-use unit::{UnitName, UnitSelectError, UnitActivateError, UnitDeactivateError, UnitIncompatibleReason, UnitDescriptionError};
 use std::path::Path;
 use std::io::Read;
 use std::fs::File;
 
+use config::Config;
+use unit::{UnitName, UnitSelectError, UnitActivateError, UnitDeactivateError, UnitIncompatibleReason, UnitDescriptionError};
+use unitlibrary::UnitLibrary;
+
 use self::systemd_parser::items::DirectiveEntry;
 use self::runny::Runny;
-use config::Config;
 
 pub struct Jig {
     name: UnitName,
@@ -92,7 +94,7 @@ impl JigDescription {
 
     /// Determine if a unit is compatible with this system.
     /// Returns Ok(()) if it is, and Err(String) if not.
-    pub fn is_compatible(&self, config: &Config) -> Result<(), UnitIncompatibleReason> {
+    pub fn is_compatible(&self, _: &UnitLibrary, config: &Config) -> Result<(), UnitIncompatibleReason> {
 
         // If this Jig has a file-existence test, run it.
         if let Some(ref test_file) = self.test_file {

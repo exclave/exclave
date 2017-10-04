@@ -44,6 +44,8 @@ impl UnitLoader {
             match msg {
                 UnitEvent::Shutdown => return,
                 UnitEvent::Status(evt) => self.handle_status(&evt),
+                UnitEvent::RescanStart => (),
+                UnitEvent::RescanFinish => (),
                 UnitEvent::Category(_) => (),
             }
         }
@@ -96,9 +98,12 @@ impl UnitLoader {
                 }
             }
         }
+
+        // FIXME: Have this call quiesce.
+        self.library.lock().unwrap().rescan();
     }
 
-    pub fn unload(&self, name: &UnitName, path: &PathBuf) {
+    pub fn unload(&self, name: &UnitName, _: &PathBuf) {
         match name.kind() {
             &UnitKind::Jig => self.library.lock().unwrap().remove_jig(name),
             &UnitKind::Test => self.library.lock().unwrap().remove_test(name),

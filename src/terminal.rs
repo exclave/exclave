@@ -78,6 +78,8 @@ impl TerminalInterface {
                 }
                 self.unit_status.get_mut(stat.kind()).unwrap().insert(stat.name().clone(), stat.status().clone());
             },
+            UnitEvent::RescanStart => (),
+            UnitEvent::RescanFinish => (),
             UnitEvent::Shutdown => (),
         }
 
@@ -92,6 +94,8 @@ impl TerminalInterface {
         match event {
             UnitEvent::Status(stat) => println!("    {} -> {}", stat.name(), stat.status()),
             UnitEvent::Category(stat) => println!("{}: {}", stat.kind(), stat.status()),
+            UnitEvent::RescanStart => println!("Started unit recsan..."),
+            UnitEvent::RescanFinish => println!("Finished rescanning units"),
             UnitEvent::Shutdown => println!("Shutting down"),
         };
     }

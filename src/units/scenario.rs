@@ -30,13 +30,13 @@ pub struct ScenarioDescription {
     description: String,
 
     /// A Vec<String> of jig names that this test is compatible with.
-    jigs: Vec<String>,
+    jigs: Vec<UnitName>,
 
     /// A Vec<String> of test names that are explicitly specified.
-    tests: Vec<String>,
+    tests: Vec<UnitName>,
 
     /// A Vec<String> of tests that are considered to have passed without running them.
-    assumptions: Vec<String>,
+    assumptions: Vec<UnitName>,
 
     /// The maximum duration, if any, for this scenario
     timeout: Option<Duration>,
@@ -97,31 +97,19 @@ impl ScenarioDescription {
                         }
                         "Jigs" => {
                             scenario_description.jigs = match directive.value() {
-                                Some(s) => {
-                                    s.split(|c| c == ',' || c == ' ')
-                                        .map(|s| s.to_string())
-                                        .collect()
-                                }
+                                Some(s) => UnitName::from_list(s, "jig")?,
                                 None => vec![],
                             }
                         }
                         "Tests" => {
-                            scenario_description.jigs = match directive.value() {
-                                Some(s) => {
-                                    s.split(|c| c == ',' || c == ' ')
-                                        .map(|s| s.to_string())
-                                        .collect()
-                                }
+                            scenario_description.tests = match directive.value() {
+                                Some(s) => UnitName::from_list(s, "test")?,
                                 None => vec![],
                             }
                         }
                         "Assumptions" => {
-                            scenario_description.jigs = match directive.value() {
-                                Some(s) => {
-                                    s.split(|c| c == ',' || c == ' ')
-                                        .map(|s| s.to_string())
-                                        .collect()
-                                }
+                            scenario_description.assumptions = match directive.value() {
+                                Some(s) => UnitName::from_list(s, "test")?,
                                 None => vec![],
                             }
                         }
@@ -136,6 +124,11 @@ impl ScenarioDescription {
 
     pub fn id(&self) -> &UnitName {
         &self.id
+    }
+
+    /// Returns true if this scenario is supported on the named jig.
+    pub fn supports_jig(&self, name: &UnitName) -> bool {
+        self.jigs.contains(name)
     }
 
     /// Determine if a unit is compatible with this system.

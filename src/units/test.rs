@@ -36,7 +36,7 @@ pub struct TestDescription {
     description: String,
 
     /// A Vec<String> of jig names that this test is compatible with.
-    jigs: Vec<String>,
+    jigs: Vec<UnitName>,
 
     /// A Vec<String> of test names that must successfully complete for this test to run.
     requires: Vec<String>,
@@ -131,11 +131,7 @@ impl TestDescription {
                         }
                         "Jigs" => {
                             test_description.jigs = match directive.value() {
-                                Some(s) => {
-                                    s.split(|c| c == ',' || c == ' ')
-                                        .map(|s| s.to_string())
-                                        .collect()
-                                }
+                                Some(s) => UnitName::from_list(s, "jig")?,
                                 None => vec![],
                             }
                         }
@@ -173,6 +169,11 @@ impl TestDescription {
 
     pub fn id(&self) -> &UnitName {
         &self.id
+    }
+
+    /// Returns true if this test is supported on the named jig.
+    pub fn supports_jig(&self, name: &UnitName) -> bool {
+        self.jigs.contains(name)
     }
 
     /// Determine if a unit is compatible with this system.

@@ -217,8 +217,19 @@ impl UnitCategoryEvent {
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub enum UnitEvent {
+    /// A unit has updated its status.
     Status(UnitStatusEvent),
+
+    /// A whole category of units has been updated.
     Category(UnitCategoryEvent),
+
+    /// A rescan has started.
+    RescanStart,
+
+    /// The rescan has finished.
+    RescanFinish,
+
+    /// The system is shutting down.
     Shutdown,
 }
 
