@@ -81,6 +81,8 @@ impl UnitName {
         })
     }
 
+    /// Generate a UnitName from the specified name.
+    /// If no extension is present, use default_type as the extension.
     pub fn from_str(name: &str, default_type: &str) -> Result<Self, UnitNameError> {
         let path = Path::new(name);
         let result = if path.extension().is_none() {

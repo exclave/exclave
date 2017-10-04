@@ -24,7 +24,7 @@ fn main() {
 
     let unit_broadcaster = UnitBroadcaster::new();
     let unit_library = Arc::new(Mutex::new(UnitLibrary::new(&unit_broadcaster, &config)));
-    let unit_loader = UnitLoader::new(&unit_broadcaster, &config, &unit_library);
+    let unit_loader = UnitLoader::new(&unit_broadcaster, &unit_library);
 
     // The signal handler must come first, so that the same mask gets
     // applied to all threads.

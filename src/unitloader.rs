@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 
-use config::Config;
 use unit::{UnitName, UnitKind};
 use unitbroadcaster::{UnitBroadcaster, UnitEvent, UnitStatus, UnitStatusEvent};
 use units::jig::JigDescription;
@@ -13,19 +12,16 @@ use unitlibrary::UnitLibrary;
 pub struct UnitLoader {
     broadcaster: UnitBroadcaster,
     receiver: Receiver<UnitEvent>,
-    config: Arc<Mutex<Config>>,
     library: Arc<Mutex<UnitLibrary>>,
 }
 
 impl UnitLoader {
     pub fn new(broadcaster: &UnitBroadcaster,
-               config: &Arc<Mutex<Config>>,
                library: &Arc<Mutex<UnitLibrary>>)
                -> Self {
         UnitLoader {
             broadcaster: broadcaster.clone(),
             receiver: broadcaster.subscribe(),
-            config: config.clone(),
             library: library.clone(),
         }
     }
