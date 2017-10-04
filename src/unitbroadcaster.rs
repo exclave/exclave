@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Sender, Receiver};
-use std::sync::{Mutex, Arc};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::fmt;
 
 use unit::{UnitKind, UnitName};
@@ -24,9 +24,6 @@ pub enum UnitStatus {
 
     /// The unit has been selected, and may be made active later on.
     Selected,
-
-    /// We tried to select a unit, but couldn't for some reason
-    SelectFailed(String /* reason */),
 
     /// The unit has been deselected (but is still loaded, and may be selected later)
     Deselected,
@@ -61,7 +58,6 @@ impl fmt::Display for UnitStatus {
             &UnitStatus::LoadStarted => write!(f, "Load started"),
             &UnitStatus::LoadFailed(ref x) => write!(f, "Load failed: {}", x),
             &UnitStatus::Incompatible(ref x) => write!(f, "Incompatible: {}", x),
-            &UnitStatus::SelectFailed(ref x) => write!(f, "Select failed: {}", x),
             &UnitStatus::Selected => write!(f, "Selected"),
             &UnitStatus::Deselected => write!(f, "Deselected"),
             &UnitStatus::Active => write!(f, "Active"),
@@ -149,13 +145,6 @@ impl UnitStatusEvent {
         }
     }
 
-    pub fn new_select_failed(name: &UnitName, msg: String) -> UnitStatusEvent {
-        UnitStatusEvent {
-            name: name.clone(),
-            status: UnitStatus::SelectFailed(msg),
-        }
-    }
-
     pub fn new_load_failed(name: &UnitName, msg: String) -> UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
@@ -240,7 +229,9 @@ pub struct UnitBroadcaster {
 
 impl UnitBroadcaster {
     pub fn new() -> Self {
-        UnitBroadcaster { senders: Arc::new(Mutex::new(vec![])) }
+        UnitBroadcaster {
+            senders: Arc::new(Mutex::new(vec![])),
+        }
     }
 
     fn broadcast_core(senders: &Arc<Mutex<Vec<Sender<UnitEvent>>>>, event: &UnitEvent) {

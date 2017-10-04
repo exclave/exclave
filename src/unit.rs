@@ -1,6 +1,6 @@
-extern crate systemd_parser;
-extern crate runny;
 extern crate regex;
+extern crate runny;
+extern crate systemd_parser;
 
 use std::fmt;
 use std::path::Path;
@@ -34,14 +34,16 @@ pub struct UnitName {
 
 pub enum UnitNameError {
     NoFileExtension,
-    UnrecognizedUnitType(String)
+    UnrecognizedUnitType(String),
 }
 
 impl fmt::Display for UnitNameError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             &UnitNameError::NoFileExtension => write!(f, "no file extension"),
-            &UnitNameError::UnrecognizedUnitType(ref t) => write!(f, "unrecognized unit type \".{}\"", t),
+            &UnitNameError::UnrecognizedUnitType(ref t) => {
+                write!(f, "unrecognized unit type \".{}\"", t)
+            }
         }
     }
 }
@@ -52,7 +54,6 @@ impl UnitName {
     }
 
     pub fn from_path(path: &Path) -> Result<Self, UnitNameError> {
-
         // Get the extension.  An empty extension is 'valid'
         // although it will get rejected below.
         let extension = match path.extension() {
@@ -88,18 +89,19 @@ impl UnitName {
         let result = if path.extension().is_none() {
             let new_path = format!("{}.{}", path.to_string_lossy(), default_type);
             Self::from_path(&Path::new(&new_path))
-        }
-        else {
+        } else {
             Self::from_path(&path)
         };
         return result;
     }
 
     pub fn from_list(s: &str, default_type: &str) -> Result<Vec<Self>, UnitNameError> {
-        let in_list = s.split(|c| c == ',' || c == ' ');
+        let in_list_list: Vec<&str> = s.split(|c| c == ',').collect();
         let mut out_list = vec![];
-        for item in in_list {
-            out_list.push(UnitName::from_str(item, default_type)?);
+        for in_list in in_list_list {
+            for item in in_list.split_whitespace() {
+                out_list.push(UnitName::from_str(item, default_type)?);
+            }
         }
         Ok(out_list)
     }
@@ -115,6 +117,7 @@ pub enum UnitIncompatibleReason {
     TestProgramReturnedNonzero(i32, String),
     TestProgramFailed(String),
     TestFileNotPresent(String),
+    IncompatibleJig,
 }
 
 impl fmt::Display for UnitIncompatibleReason {
@@ -129,6 +132,7 @@ impl fmt::Display for UnitIncompatibleReason {
             &UnitIncompatibleReason::TestFileNotPresent(ref file_name) => {
                 write!(f, "Test file {} not present", file_name)
             }
+            &UnitIncompatibleReason::IncompatibleJig => write!(f, "Jig not compatible"),
         }
     }
 }
@@ -139,34 +143,14 @@ impl From<RunnyError> for UnitIncompatibleReason {
             RunnyError::NoCommandSpecified => {
                 UnitIncompatibleReason::TestProgramFailed("No command specified".to_owned())
             }
-            RunnyError::RunnyIoError(ref e) => {
-                UnitIncompatibleReason::TestProgramFailed(format!("Error running test program: {}",
-                                                                  e))
-            }
+            RunnyError::RunnyIoError(ref e) => UnitIncompatibleReason::TestProgramFailed(
+                format!("Error running test program: {}", e),
+            ),
         }
     }
 }
 
-pub enum UnitSelectError {
-    MissingDependency(UnitName /* This unit */, UnitName /* Wanted dependency */),
-    UnitIncompatible(UnitName /* This unit */, UnitName /* Thing it is incompatible with */),
-}
-
-impl fmt::Display for UnitSelectError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &UnitSelectError::UnitIncompatible(ref name, ref other) => {
-                write!(f, "Unit {} is incompatible with {}", name, other)
-            }
-            &UnitSelectError::MissingDependency(ref name, ref dep) => {
-                write!(f, "Unit {} depends on {} which was not found", name, dep)
-            }
-        }
-    }
-}
-
-pub enum UnitActivateError {
-}
+pub enum UnitActivateError {}
 
 impl fmt::Display for UnitActivateError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -174,8 +158,7 @@ impl fmt::Display for UnitActivateError {
     }
 }
 
-pub enum UnitDeactivateError {
-}
+pub enum UnitDeactivateError {}
 
 impl fmt::Display for UnitDeactivateError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -189,10 +172,12 @@ pub enum UnitDescriptionError {
     FileOpenError(io::Error),
     ParseError(ParserError),
     RegexError(self::regex::Error),
-    InvalidValue(String, // Section name
-                 String, // Key name
-                 String, // Specified value
-                 Vec<String> /* Allowed values */),
+    InvalidValue(
+        String,      // Section name
+        String,      // Key name
+        String,      // Specified value
+        Vec<String>, /* Allowed values */
+    ),
 }
 
 impl From<UnitNameError> for UnitDescriptionError {
@@ -223,23 +208,27 @@ impl fmt::Display for UnitDescriptionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use std::error::Error;
         match self {
-            &UnitDescriptionError::InvalidUnitName(ref reason) => write!(f, "Invalid jig unit name: {}", reason),
+            &UnitDescriptionError::InvalidUnitName(ref reason) => {
+                write!(f, "Invalid unit name: {}", reason)
+            }
             &UnitDescriptionError::MissingSection(ref sec) => {
                 write!(f, "Missing [{}] section", sec)
             }
-            &UnitDescriptionError::FileOpenError(ref e) => write!(f, "Unable to open file: {}", e.description()),
+            &UnitDescriptionError::FileOpenError(ref e) => {
+                write!(f, "Unable to open file: {}", e.description())
+            }
             &UnitDescriptionError::ParseError(ref e) => {
                 write!(f, "Syntax error: {}", e.description())
             }
             &UnitDescriptionError::RegexError(ref e) => write!(f, "Unable to parse regex: {}", e),
-            &UnitDescriptionError::InvalidValue(ref sec, ref key, ref val, ref allowed) => {
-                write!(f,
-                       "Key {} in section {} has invalid value: {}.  Value must be one of: {}",
-                       key,
-                       sec,
-                       val,
-                       allowed.join(","))
-            }
+            &UnitDescriptionError::InvalidValue(ref sec, ref key, ref val, ref allowed) => write!(
+                f,
+                "Key {} in section {} has invalid value: {}.  Value must be one of: {}",
+                key,
+                sec,
+                val,
+                allowed.join(",")
+            ),
         }
     }
 }

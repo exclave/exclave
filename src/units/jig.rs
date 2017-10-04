@@ -1,12 +1,13 @@
-extern crate systemd_parser;
 extern crate runny;
+extern crate systemd_parser;
 
 use std::path::Path;
 use std::io::Read;
 use std::fs::File;
 
 use config::Config;
-use unit::{UnitName, UnitSelectError, UnitActivateError, UnitDeactivateError, UnitIncompatibleReason, UnitDescriptionError};
+use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason,
+           UnitName};
 use unitlibrary::UnitLibrary;
 
 use self::systemd_parser::items::DirectiveEntry;
@@ -65,27 +66,25 @@ impl JigDescription {
 
         for entry in unit_file.lookup_by_category("Jig") {
             match entry {
-                &DirectiveEntry::Solo(ref directive) => {
-                    match directive.key() {
-                        "Name" => jig_description.name = directive.value().unwrap_or("").to_owned(),
-                        "Description" => {
-                            jig_description.description = directive.value().unwrap_or("").to_owned()
-                        }
-                        "TestFile" => {
-                            jig_description.test_file = match directive.value() {
-                                Some(s) => Some(s.to_owned()),
-                                None => None,
-                            }
-                        }
-                        "TestProgram" => {
-                            jig_description.test_program = match directive.value() {
-                                Some(s) => Some(s.to_owned()),
-                                None => None,
-                            }
-                        }
-                        &_ => (),
+                &DirectiveEntry::Solo(ref directive) => match directive.key() {
+                    "Name" => jig_description.name = directive.value().unwrap_or("").to_owned(),
+                    "Description" => {
+                        jig_description.description = directive.value().unwrap_or("").to_owned()
                     }
-                }
+                    "TestFile" => {
+                        jig_description.test_file = match directive.value() {
+                            Some(s) => Some(s.to_owned()),
+                            None => None,
+                        }
+                    }
+                    "TestProgram" => {
+                        jig_description.test_program = match directive.value() {
+                            Some(s) => Some(s.to_owned()),
+                            None => None,
+                        }
+                    }
+                    &_ => (),
+                },
                 &_ => (),
             }
         }
@@ -94,12 +93,17 @@ impl JigDescription {
 
     /// Determine if a unit is compatible with this system.
     /// Returns Ok(()) if it is, and Err(String) if not.
-    pub fn is_compatible(&self, _: &UnitLibrary, config: &Config) -> Result<(), UnitIncompatibleReason> {
-
+    pub fn is_compatible(
+        &self,
+        _: &UnitLibrary,
+        config: &Config,
+    ) -> Result<(), UnitIncompatibleReason> {
         // If this Jig has a file-existence test, run it.
         if let Some(ref test_file) = self.test_file {
             if !Path::new(&test_file).exists() {
-                return Err(UnitIncompatibleReason::TestFileNotPresent(test_file.clone()));
+                return Err(UnitIncompatibleReason::TestFileNotPresent(
+                    test_file.clone(),
+                ));
             }
         }
 
@@ -107,7 +111,8 @@ impl JigDescription {
         if let Some(ref cmd_str) = self.test_program {
             use std::io::{BufRead, BufReader};
 
-            let running = Runny::new(cmd_str).directory(&Some(config.working_directory().clone()))
+            let running = Runny::new(cmd_str)
+                .directory(&Some(config.working_directory().clone()))
                 .timeout(config.timeout().clone())
                 .path(config.paths().clone())
                 .start()?;
@@ -121,7 +126,10 @@ impl JigDescription {
             }
             let result = reader.get_ref().result();
             if result != 0 {
-                return Err(UnitIncompatibleReason::TestProgramReturnedNonzero(result, buf));
+                return Err(UnitIncompatibleReason::TestProgramReturnedNonzero(
+                    result,
+                    buf,
+                ));
             }
         }
         Ok(())
@@ -131,16 +139,22 @@ impl JigDescription {
         &self.id
     }
 
-    pub fn select(&self) -> Result<Jig, UnitSelectError> {
-        Jig::new(self)
+    pub fn select(
+        &self,
+        library: &UnitLibrary,
+        config: &Config,
+    ) -> Result<Jig, UnitIncompatibleReason> {
+        self.is_compatible(library, config)?;
+
+        Ok(Jig::new(self))
     }
 }
 
 impl Jig {
-    pub fn new(desc: &JigDescription) -> Result<Jig, UnitSelectError> {
-        Ok(Jig {
+    pub fn new(desc: &JigDescription) -> Jig {
+        Jig {
             name: desc.id.clone(),
-        })
+        }
     }
 
     pub fn name(&self) -> &UnitName {
@@ -153,11 +167,5 @@ impl Jig {
 
     pub fn deactivate(&self) -> Result<(), UnitDeactivateError> {
         Ok(())
-    }
-}
-
-impl Drop for Jig {
-    fn drop(&mut self) {
-        println!("Dropping {}", self.name);
     }
 }

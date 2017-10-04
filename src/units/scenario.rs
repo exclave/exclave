@@ -1,21 +1,28 @@
-extern crate systemd_parser;
-extern crate runny;
 extern crate regex;
+extern crate runny;
+extern crate systemd_parser;
 
 use std::path::Path;
 use std::time::Duration;
 use std::io::Read;
 use std::fs::File;
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 
 use self::regex::Regex;
 use self::systemd_parser::items::DirectiveEntry;
 use self::runny::Runny;
+
 use config::Config;
-use unit::{UnitName, UnitSelectError, UnitActivateError, UnitDeactivateError,
-           UnitIncompatibleReason, UnitDescriptionError};
+use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason,
+           UnitName};
+use unitlibrary::UnitLibrary;
+use units::test::Test;
 
 pub struct Scenario {
     name: UnitName,
+    test_sequence: Vec<Arc<Mutex<Test>>>,
+    tests: HashMap<UnitName, Arc<Mutex<Test>>>,
 }
 
 /// A struct defining an in-memory representation of a .scenario file
@@ -86,36 +93,34 @@ impl ScenarioDescription {
 
         for entry in unit_file.lookup_by_category("Scenario") {
             match entry {
-                &DirectiveEntry::Solo(ref directive) => {
-                    match directive.key() {
-                        "Name" => {
-                            scenario_description.name = directive.value().unwrap_or("").to_owned()
-                        }
-                        "Description" => {
-                            scenario_description.description =
-                                directive.value().unwrap_or("").to_owned()
-                        }
-                        "Jigs" => {
-                            scenario_description.jigs = match directive.value() {
-                                Some(s) => UnitName::from_list(s, "jig")?,
-                                None => vec![],
-                            }
-                        }
-                        "Tests" => {
-                            scenario_description.tests = match directive.value() {
-                                Some(s) => UnitName::from_list(s, "test")?,
-                                None => vec![],
-                            }
-                        }
-                        "Assumptions" => {
-                            scenario_description.assumptions = match directive.value() {
-                                Some(s) => UnitName::from_list(s, "test")?,
-                                None => vec![],
-                            }
-                        }
-                        &_ => (),
+                &DirectiveEntry::Solo(ref directive) => match directive.key() {
+                    "Name" => {
+                        scenario_description.name = directive.value().unwrap_or("").to_owned()
                     }
-                }
+                    "Description" => {
+                        scenario_description.description =
+                            directive.value().unwrap_or("").to_owned()
+                    }
+                    "Jigs" => {
+                        scenario_description.jigs = match directive.value() {
+                            Some(s) => UnitName::from_list(s, "jig")?,
+                            None => vec![],
+                        }
+                    }
+                    "Tests" => {
+                        scenario_description.tests = match directive.value() {
+                            Some(s) => UnitName::from_list(s, "test")?,
+                            None => vec![],
+                        }
+                    }
+                    "Assumptions" => {
+                        scenario_description.assumptions = match directive.value() {
+                            Some(s) => UnitName::from_list(s, "test")?,
+                            None => vec![],
+                        }
+                    }
+                    &_ => (),
+                },
                 &_ => (),
             }
         }
@@ -132,48 +137,39 @@ impl ScenarioDescription {
     }
 
     /// Determine if a unit is compatible with this system.
-    /// Returns Ok(()) if it is, and Err(String) if not.
-    pub fn is_compatible(&self, config: &Config) -> Result<(), UnitIncompatibleReason> {
-        // If this Jig has a file-existence test, run it.
-        // if let Some(ref test_file) = self.test_file {
-        // if !Path::new(&test_file).exists() {
-        // return Err(UnitIncompatibleReason::TestFileNotPresent(test_file.clone()));
-        // }
-        // }
-        //
-        // If this Jig has a test-program, run that program and check the output.
-        // if let Some(ref cmd_str) = self.test_program {
-        // use std::io::{BufRead, BufReader};
-        //
-        // let running = Runny::new(cmd_str).directory(&Some(config.working_directory().clone()))
-        // .timeout(config.timeout().clone())
-        // .path(config.paths().clone())
-        // .start()?;
-        //
-        // let mut reader = BufReader::new(running);
-        // let mut buf = String::new();
-        // loop {
-        // if let Err(_) = reader.read_line(&mut buf) {
-        // break;
-        // }
-        // }
-        // let result = reader.get_ref().result();
-        // if result != 0 {
-        // return Err(UnitIncompatibleReason::TestProgramReturnedNonzero(result, buf));
-        // }
-        // }
-        //
-        Ok(())
+    pub fn is_compatible(
+        &self,
+        library: &UnitLibrary,
+        _: &Config,
+    ) -> Result<(), UnitIncompatibleReason> {
+        if self.jigs.len() == 0 {
+            return Ok(());
+        }
+        for jig_name in &self.jigs {
+            if library.jig_is_loaded(&jig_name) {
+                return Ok(());
+            }
+        }
+        Err(UnitIncompatibleReason::IncompatibleJig)
     }
 
-    pub fn select(&self) -> Result<Scenario, UnitSelectError> {
-        Scenario::new(self)
+    pub fn select(
+        &self,
+        library: &UnitLibrary,
+        config: &Config,
+    ) -> Result<Scenario, UnitIncompatibleReason> {
+        self.is_compatible(library, config)?;
+        Ok(Scenario::new(self))
     }
 }
 
 impl Scenario {
-    pub fn new(desc: &ScenarioDescription) -> Result<Scenario, UnitSelectError> {
-        Ok(Scenario { name: desc.id.clone() })
+    pub fn new(desc: &ScenarioDescription) -> Scenario {
+        Scenario {
+            name: desc.id.clone(),
+            tests: HashMap::new(),
+            test_sequence: vec![],
+        }
     }
 
     pub fn activate(&self) -> Result<(), UnitActivateError> {
@@ -183,10 +179,8 @@ impl Scenario {
     pub fn deactivate(&self) -> Result<(), UnitDeactivateError> {
         Ok(())
     }
-}
 
-impl Drop for Scenario {
-    fn drop(&mut self) {
-        println!("Dropping scenario {}", self.name);
+    pub fn uses_test(&self, test_name: &UnitName) -> bool {
+        self.tests.get(test_name).is_some()
     }
 }

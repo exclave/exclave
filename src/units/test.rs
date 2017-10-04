@@ -9,10 +9,11 @@ use std::fs::File;
 
 use self::regex::Regex;
 use self::systemd_parser::items::DirectiveEntry;
-use self::runny::Runny;
+
 use config::Config;
-use unit::{UnitName, UnitSelectError, UnitActivateError, UnitDeactivateError,
+use unit::{UnitName, UnitActivateError, UnitDeactivateError,
            UnitIncompatibleReason, UnitDescriptionError};
+use unitlibrary::UnitLibrary;
 
 #[derive(Debug, PartialEq)]
 enum TestType {
@@ -48,7 +49,7 @@ pub struct TestDescription {
     /// A Vec<String> of tests that this test implies.  This can be used for debugging tests
     /// that "fake" out things like OTP fuse blowing or device reformatting that you normally
     /// want to skip when fixing things in the factory.
-    provides: Vec<String>,
+    provides: Vec<UnitName>,
 
     /// The maximum duration this test can be run for.
     timeout: Option<Duration>,
@@ -135,6 +136,12 @@ impl TestDescription {
                                 None => vec![],
                             }
                         }
+                        "Provides" => {
+                            test_description.provides = match directive.value() {
+                                Some(s) => UnitName::from_list(s, "test")?,
+                                None => vec![],
+                            }
+                        }
                         "DaemonReadyText" => {
                             test_description.test_daemon_ready = match directive.value() {
                                 Some(s) => Some(Regex::new(s)?),
@@ -177,48 +184,29 @@ impl TestDescription {
     }
 
     /// Determine if a unit is compatible with this system.
-    /// Returns Ok(()) if it is, and Err(String) if not.
-    pub fn is_compatible(&self, config: &Config) -> Result<(), UnitIncompatibleReason> {
-        // If this Jig has a file-existence test, run it.
-        // if let Some(ref test_file) = self.test_file {
-        // if !Path::new(&test_file).exists() {
-        // return Err(UnitIncompatibleReason::TestFileNotPresent(test_file.clone()));
-        // }
-        // }
-        //
-        // If this Jig has a test-program, run that program and check the output.
-        // if let Some(ref cmd_str) = self.test_program {
-        // use std::io::{BufRead, BufReader};
-        //
-        // let running = Runny::new(cmd_str).directory(&Some(config.working_directory().clone()))
-        // .timeout(config.timeout().clone())
-        // .path(config.paths().clone())
-        // .start()?;
-        //
-        // let mut reader = BufReader::new(running);
-        // let mut buf = String::new();
-        // loop {
-        // if let Err(_) = reader.read_line(&mut buf) {
-        // break;
-        // }
-        // }
-        // let result = reader.get_ref().result();
-        // if result != 0 {
-        // return Err(UnitIncompatibleReason::TestProgramReturnedNonzero(result, buf));
-        // }
-        // }
-        //
-        Ok(())
+    pub fn is_compatible(&self, library: &UnitLibrary, _: &Config) -> Result<(), UnitIncompatibleReason> {
+        if self.jigs.len() == 0 {
+            return Ok(());
+        }
+        for jig_name in &self.jigs {
+            if library.jig_is_loaded(&jig_name) {
+                return Ok(());
+            }
+        }
+        Err(UnitIncompatibleReason::IncompatibleJig)
     }
 
-    pub fn select(&self) -> Result<Test, UnitSelectError> {
-        Test::new(self)
+    pub fn select(&self, 
+        library: &UnitLibrary,
+        config: &Config) -> Result<Test, UnitIncompatibleReason> {
+        self.is_compatible(library, config)?;
+        Ok(Test::new(self))
     }
 }
 
 impl Test {
-    pub fn new(desc: &TestDescription) -> Result<Test, UnitSelectError> {
-        Ok(Test { name: desc.id.clone() })
+    pub fn new(desc: &TestDescription) -> Test {
+        Test { name: desc.id.clone() }
     }
 
     pub fn activate(&self) -> Result<(), UnitActivateError> {
@@ -227,11 +215,5 @@ impl Test {
 
     pub fn deactivate(&self) -> Result<(), UnitDeactivateError> {
         Ok(())
-    }
-}
-
-impl Drop for Test {
-    fn drop(&mut self) {
-        println!("Dropping test {}", self.name);
     }
 }
