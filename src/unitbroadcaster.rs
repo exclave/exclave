@@ -43,8 +43,11 @@ pub enum UnitStatus {
     /// The unit was active, then stopped being active due to finishing unsuccessfully
     DeactivatedUnsuccessfully(String /* reason */),
 
-    /// The unit already successfully loaded, but is being updated (or removed)
+    /// The unit already successfully loaded, but is being removed
     UnloadStarted,
+
+    /// The unit already successfully loaded, but is being updated
+    UpdateStarted,
 
     /// The unit file was removed from the disk
     Removed(PathBuf),
@@ -70,6 +73,7 @@ impl fmt::Display for UnitStatus {
                 write!(f, "Deactivated unsuccessfilly: {}", x)
             }
             &UnitStatus::UnloadStarted => write!(f, "Unloading"),
+            &UnitStatus::UpdateStarted => write!(f, "Updating"),
             &UnitStatus::Removed(ref path) => write!(f, "Removed {}", path.to_string_lossy()),
         }
     }
@@ -135,6 +139,13 @@ impl UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
             status: UnitStatus::LoadStarted,
+        }
+    }
+
+    pub fn new_update_started(name: &UnitName) -> UnitStatusEvent {
+        UnitStatusEvent {
+            name: name.clone(),
+            status: UnitStatus::UpdateStarted,
         }
     }
 
