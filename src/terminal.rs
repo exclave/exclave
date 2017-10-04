@@ -16,7 +16,7 @@ pub enum TerminalOutputType {
 
 pub struct TerminalInterface {
     /// A list of known categories, and their statuses.
-    category_status: HashMap<UnitKind, UnitCategoryStatus>,
+    category_status: BTreeMap<UnitKind, UnitCategoryStatus>,
 
     /// A hashmap of unit types, with each bucket containing a tree of units of statuses.
     /// Each time a status is updated, it is put in its appropriate bucket.
@@ -48,7 +48,7 @@ impl TerminalInterface {
             let mut ti = TerminalInterface {
                 output_type: output_type,
                 unit_status: HashMap::new(),
-                category_status: HashMap::new(),
+                category_status: BTreeMap::new(),
                 terminal: stdout,
                 last_line_count: 0,
             };
