@@ -43,7 +43,7 @@ pub enum UnitStatus {
     /// The unit was active, then stopped being active due to finishing unsuccessfully
     DeactivatedUnsuccessfully(String /* reason */),
 
-    /// The unit successfully loaded, but is being update (or removed)
+    /// The unit already successfully loaded, but is being updated (or removed)
     UnloadStarted,
 
     /// The unit file was removed from the disk
@@ -93,8 +93,8 @@ impl UnitStatusEvent {
     }
     pub fn new_added(path: &Path) -> Option<UnitStatusEvent> {
         let name = match UnitName::from_path(path) {
-            None => return None,
-            Some(s) => s,
+            Err(_) => return None,
+            Ok(s) => s,
         };
 
         Some(UnitStatusEvent {
@@ -104,8 +104,8 @@ impl UnitStatusEvent {
     }
     pub fn new_updated(path: &Path) -> Option<UnitStatusEvent> {
         let name = match UnitName::from_path(path) {
-            None => return None,
-            Some(s) => s,
+            Err(_) => return None,
+            Ok(s) => s,
         };
 
         Some(UnitStatusEvent {
@@ -115,8 +115,8 @@ impl UnitStatusEvent {
     }
     pub fn new_removed(path: &Path) -> Option<UnitStatusEvent> {
         let name = match UnitName::from_path(path) {
-            None => return None,
-            Some(s) => s,
+            Err(_) => return None,
+            Ok(s) => s,
         };
 
         Some(UnitStatusEvent {
@@ -173,16 +173,11 @@ impl UnitStatusEvent {
         }
     }
 
-    pub fn new_unloading(path: &Path) -> Option<UnitStatusEvent> {
-        let name = match UnitName::from_path(path) {
-            None => return None,
-            Some(s) => s,
-        };
-
-        Some(UnitStatusEvent {
-            name: name,
+    pub fn new_unloading(name: &UnitName) -> UnitStatusEvent {
+        UnitStatusEvent {
+            name: name.clone(),
             status: UnitStatus::UnloadStarted,
-        })
+        }
     }
 }
 

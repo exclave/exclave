@@ -32,15 +32,26 @@ pub struct UnitName {
     kind: UnitKind,
 }
 
+pub enum UnitNameError {
+    NoFileExtension,
+    UnrecognizedUnitType(String)
+}
+
+impl fmt::Display for UnitNameError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &UnitNameError::NoFileExtension => write!(f, "no file extension"),
+            &UnitNameError::UnrecognizedUnitType(ref t) => write!(f, "unrecognized unit type \".{}\"", t),
+        }
+    }
+}
+
 impl UnitName {
     pub fn kind(&self) -> &UnitKind {
         &self.kind
     }
-    pub fn id(&self) -> &String {
-        &self.id
-    }
 
-    pub fn from_path(path: &Path) -> Option<Self> {
+    pub fn from_path(path: &Path) -> Result<Self, UnitNameError> {
 
         // Get the extension.  An empty extension is 'valid'
         // although it will get rejected below.
@@ -51,7 +62,7 @@ impl UnitName {
 
         // Get the unit ID.  An empty unit ID is considered invalid.
         let unit_id = match path.file_stem() {
-            None => return None,
+            None => return Err(UnitNameError::NoFileExtension),
             Some(s) => s.to_str().unwrap_or("").to_owned(),
         };
 
@@ -61,10 +72,10 @@ impl UnitName {
             "jig" => UnitKind::Jig,
             "scenario" => UnitKind::Scenario,
             "test" => UnitKind::Test,
-            _ => return None,
+            _ => return Err(UnitNameError::UnrecognizedUnitType(extension)),
         };
 
-        Some(UnitName {
+        Ok(UnitName {
             id: unit_id,
             kind: unit_kind,
         })
@@ -150,7 +161,7 @@ impl fmt::Display for UnitDeactivateError {
 }
 
 pub enum UnitDescriptionError {
-    InvalidUnitName,
+    InvalidUnitName(UnitNameError),
     MissingSection(String /* section name */),
     FileOpenError(io::Error),
     ParseError(ParserError),
@@ -159,6 +170,12 @@ pub enum UnitDescriptionError {
                  String, // Key name
                  String, // Specified value
                  Vec<String> /* Allowed values */),
+}
+
+impl From<UnitNameError> for UnitDescriptionError {
+    fn from(kind: UnitNameError) -> Self {
+        UnitDescriptionError::InvalidUnitName(kind)
+    }
 }
 
 impl From<io::Error> for UnitDescriptionError {
@@ -183,7 +200,7 @@ impl fmt::Display for UnitDescriptionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use std::error::Error;
         match self {
-            &UnitDescriptionError::InvalidUnitName => write!(f, "Invalid jig unit name"),
+            &UnitDescriptionError::InvalidUnitName(ref reason) => write!(f, "Invalid jig unit name: {}", reason),
             &UnitDescriptionError::MissingSection(ref sec) => {
                 write!(f, "Missing [{}] section", sec)
             }

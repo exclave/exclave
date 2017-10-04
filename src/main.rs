@@ -8,12 +8,14 @@ mod units;
 mod unitbroadcaster;
 mod unitloader;
 mod unitwatcher;
+mod unitlibrary;
 mod terminal;
 mod config;
 
 use unitbroadcaster::{UnitEvent, UnitBroadcaster};
 use unitwatcher::UnitWatcher;
 use unitloader::UnitLoader;
+use unitlibrary::UnitLibrary;
 
 use clap::{Arg, App};
 
@@ -21,7 +23,8 @@ fn main() {
     let config = Arc::new(Mutex::new(config::Config::new()));
 
     let unit_broadcaster = UnitBroadcaster::new();
-    let unit_loader = UnitLoader::new(&unit_broadcaster, &config);
+    let unit_library = Arc::new(Mutex::new(UnitLibrary::new(&unit_broadcaster, &config)));
+    let unit_loader = UnitLoader::new(&unit_broadcaster, &config, &unit_library);
 
     // The signal handler must come first, so that the same mask gets
     // applied to all threads.

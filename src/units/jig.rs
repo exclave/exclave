@@ -40,10 +40,7 @@ pub struct JigDescription {
 
 impl JigDescription {
     pub fn from_path(path: &Path) -> Result<JigDescription, UnitDescriptionError> {
-        let unit_name = match UnitName::from_path(path) {
-            Some(name) => name,
-            None => return Err(UnitDescriptionError::InvalidUnitName),
-        };
+        let unit_name = UnitName::from_path(path)?;
 
         // Parse the file into a systemd unit_file object
         let mut contents = String::with_capacity(8192);
@@ -128,6 +125,10 @@ impl JigDescription {
         Ok(())
     }
 
+    pub fn id(&self) -> &UnitName {
+        &self.id
+    }
+
     pub fn select(&self) -> Result<Jig, UnitSelectError> {
         Jig::new(self)
     }
@@ -138,6 +139,10 @@ impl Jig {
         Ok(Jig {
             name: desc.id.clone(),
         })
+    }
+
+    pub fn name(&self) -> &UnitName {
+        &self.name
     }
 
     pub fn activate(&self) -> Result<(), UnitActivateError> {

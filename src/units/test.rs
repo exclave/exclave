@@ -82,10 +82,7 @@ pub struct TestDescription {
 
 impl TestDescription {
     pub fn from_path(path: &Path) -> Result<TestDescription, UnitDescriptionError> {
-        let unit_name = match UnitName::from_path(path) {
-            Some(name) => name,
-            None => return Err(UnitDescriptionError::InvalidUnitName),
-        };
+        let unit_name = UnitName::from_path(path)?;
 
         // Parse the file into a systemd unit_file object
         let mut contents = String::with_capacity(8192);
@@ -172,6 +169,10 @@ impl TestDescription {
             }
         }
         Ok(test_description)
+    }
+
+    pub fn id(&self) -> &UnitName {
+        &self.id
     }
 
     /// Determine if a unit is compatible with this system.
