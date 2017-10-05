@@ -131,6 +131,7 @@ impl UnitStatusEvent {
             status: UnitStatus::Selected,
         }
     }
+
     pub fn new_load_started(name: &UnitName) -> UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
@@ -152,17 +153,31 @@ impl UnitStatusEvent {
         }
     }
 
-    pub fn new_unit_active(name: &UnitName) -> UnitStatusEvent {
+    pub fn new_active(name: &UnitName) -> UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
             status: UnitStatus::Active,
         }
     }
 
-    pub fn new_unit_active_failed(name: &UnitName, msg: String) -> UnitStatusEvent {
+    pub fn new_active_failed(name: &UnitName, msg: String) -> UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
             status: UnitStatus::ActivationFailed(msg),
+        }
+    }
+
+    pub fn new_deactivate_success(name: &UnitName, msg: String) -> UnitStatusEvent {
+        UnitStatusEvent {
+            name: name.clone(),
+            status: UnitStatus::DeactivatedSuccessfully(msg),
+        }
+    }
+
+    pub fn new_deactivate_failure(name: &UnitName, msg: String) -> UnitStatusEvent {
+        UnitStatusEvent {
+            name: name.clone(),
+            status: UnitStatus::DeactivatedUnsuccessfully(msg),
         }
     }
 
@@ -170,6 +185,13 @@ impl UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
             status: UnitStatus::Incompatible(msg),
+        }
+    }
+
+    pub fn new_deselected(name: &UnitName) -> UnitStatusEvent {
+        UnitStatusEvent {
+            name: name.clone(),
+            status: UnitStatus::Deselected,
         }
     }
 
@@ -229,9 +251,7 @@ pub struct UnitBroadcaster {
 
 impl UnitBroadcaster {
     pub fn new() -> Self {
-        UnitBroadcaster {
-            senders: Arc::new(Mutex::new(vec![])),
-        }
+        UnitBroadcaster { senders: Arc::new(Mutex::new(vec![])) }
     }
 
     fn broadcast_core(senders: &Arc<Mutex<Vec<Sender<UnitEvent>>>>, event: &UnitEvent) {

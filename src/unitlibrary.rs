@@ -237,14 +237,15 @@ impl UnitLibrary {
     ///
     /// Each unit type must be handled differently.
     ///
-    /// 1. Mark every Scenario or Test that depends on a dirty jig as dirty.
+    /// 1. Mark every Interface, Scenario or Test that depends on a dirty jig as dirty.
     ///    That way, they will be rescanned.
     /// 2. Mark every Scenario that uses a dirty Test as dirty.
     ///    That way, scenario dependency graphs will be re-evaluated.
     /// 3. Delete any "dirty" objects that were Deleted.
     /// 4. Load all Jigs that are valid.
-    /// 5. Load all Tests that are compatible with this Jig.
-    /// 6. Load all Scenarios.
+    /// 5. Load all Interfaces that are valid.
+    /// 6. Load all Tests that are compatible with this Jig.
+    /// 7. Load all Scenarios.
     pub fn rescan(&mut self) {
         self.broadcaster.broadcast(&UnitEvent::RescanStart);
         let mut statuses = self.unit_status.borrow_mut();
@@ -264,6 +265,14 @@ impl UnitLibrary {
                     self.dirty_scenarios
                         .borrow_mut()
                         .insert(scenario_name.clone(), ());
+                }
+            }
+
+            for (interface_name, interface_description) in self.interface_descriptions
+                .borrow()
+                .iter() {
+                if interface_description.supports_jig(jig_name) {
+                    self.dirty_interfaces.borrow_mut().insert(interface_name.clone(), ());
                 }
             }
         }
@@ -298,6 +307,12 @@ impl UnitLibrary {
                 statuses.remove(id);
             }
         }
+        for (id, _) in self.dirty_interfaces.borrow().iter() {
+            if statuses.get(id).unwrap() == &UnitStatus::UnloadStarted {
+                self.interfaces.borrow_mut().remove(id);
+                statuses.remove(id);
+            }
+        }
 
         // 4. Load all Jigs that are valid.
         for (id, _) in self.dirty_jigs.borrow().iter() {
@@ -313,7 +328,21 @@ impl UnitLibrary {
         }
         self.dirty_jigs.borrow_mut().clear();
 
-        // 5. Load all Tests that are compatible with this Jig.
+        // 5. Load all Interfaces that are compatible with this Jig.
+        for (id, _) in self.dirty_interfaces.borrow().iter() {
+            match statuses.get(id).unwrap() {
+                &UnitStatus::LoadStarted => {
+                    self.load_interface(self.interface_descriptions.borrow().get(id).unwrap())
+                }
+                &UnitStatus::UpdateStarted => {
+                    self.load_interface(self.interface_descriptions.borrow().get(id).unwrap())
+                }
+                x => panic!("Unexpected interface unit status: {}", x),
+            }
+        }
+        self.dirty_interfaces.borrow_mut().clear();
+
+        // 6. Load all Tests that are compatible with this Jig.
         for (id, _) in self.dirty_tests.borrow().iter() {
             match statuses.get(id).unwrap() {
                 &UnitStatus::LoadStarted => {
@@ -327,7 +356,7 @@ impl UnitLibrary {
         }
         self.dirty_tests.borrow_mut().clear();
 
-        // 6. Load all Scenarios that are compatible with this Jig.
+        // 7. Load all Scenarios that are compatible with this Jig.
         for (id, _) in self.dirty_scenarios.borrow().iter() {
             match statuses.get(id).unwrap() {
                 &UnitStatus::LoadStarted => {
@@ -380,6 +409,53 @@ impl UnitLibrary {
             .insert(description.id().clone(), Arc::new(Mutex::new(new_jig)));
         self.broadcaster
             .broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected(description.id())));
+    }
+
+    fn load_interface(&self, description: &InterfaceDescription) {
+        // If the interface exists in the array already, then it is active and will be deactivated first.
+        if let Some(old_interface) = self.interfaces.borrow_mut().remove(description.id()) {
+            match old_interface.lock().unwrap().deactivate() {
+                Ok(_) =>
+            self.broadcaster.broadcast(
+                    &UnitEvent::Status(UnitStatusEvent::new_deactivate_success(description.id(), "Reloading interface".to_owned()))),
+                Err(e) =>
+            self.broadcaster.broadcast(
+                    &UnitEvent::Status(UnitStatusEvent::new_deactivate_failure(description.id(), format!("Unable to deactivate: {}", e)))),
+            }
+            self.broadcaster
+                .broadcast(&UnitEvent::Status(UnitStatusEvent::new_deselected(description.id())));
+        }
+
+        // "Select" the Interface, which means we can activate it later on.
+        let new_interface = match description.select(self, &*self.config.lock().unwrap()) {
+            Ok(o) => o,
+            Err(e) => {
+                self.broadcaster.broadcast(
+                    &UnitEvent::Status(UnitStatusEvent::new_unit_incompatible(
+                        description.id(),
+                        format!("{}", e),
+                    )),
+                );
+                return;
+            }
+        };
+
+        self.broadcaster
+            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected(description.id())));
+
+        if let Err(e) = new_interface.activate() {
+            self.broadcaster
+            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active_failed(description.id(), format!("{}", e))));
+            return;
+        }
+
+        self.broadcaster
+            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(description.id())));
+
+        self.interfaces
+            .borrow_mut()
+            .insert(description.id().clone(),
+                    Arc::new(Mutex::new(new_interface)));
     }
 
     fn load_test(&self, description: &TestDescription) {
