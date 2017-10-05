@@ -50,12 +50,6 @@ impl Dependency for AssumptionDependency {
     }
 }
 
-pub struct Scenario {
-    name: UnitName,
-    test_sequence: Vec<Arc<Mutex<Test>>>,
-    tests: HashMap<UnitName, Arc<Mutex<Test>>>,
-}
-
 /// A struct defining an in-memory representation of a .scenario file
 pub struct ScenarioDescription {
     /// The id of the unit (including the kind)
@@ -173,7 +167,7 @@ impl ScenarioDescription {
     pub fn is_compatible(&self,
                          library: &UnitLibrary,
                          _: &Config)
-                         -> Result<(), UnitIncompatibleReason> {
+                         -> Result<Vec<UnitName>, UnitIncompatibleReason> {
         // If there is at least one jig present, ensure that it is loaded.
         if self.jigs.len() > 0 {
             let mut loaded = false;
@@ -190,32 +184,20 @@ impl ScenarioDescription {
         // Build the dependency graph, but don't use the result.
         // This is because right now, we're just concerned with
         // whether the dependencies are satisfied.
-        self.get_test_order(library)?;
-        // Trim down the test list.  Remove anything that's just an assumption.
-        // let mut trimmed_order = vec![];
-        // for test in test_order {
-        // if !assumptions.contains(&test) {
-        // trimmed_order.push(test);
-        // } else {
-        // test_set.debug(format!("Removing test {} since it's an assumption.", test));
-        // }
-        // }
-        // let test_order = trimmed_order;
-        //
-        Ok(())
+        self.get_test_order(library)
     }
 
     pub fn select(&self,
                   library: &UnitLibrary,
                   config: &Config)
                   -> Result<Scenario, UnitIncompatibleReason> {
-        self.is_compatible(library, config)?;
-        Ok(Scenario::new(self))
+        let test_order = self.is_compatible(library, config)?;
+        Ok(Scenario::new(self, test_order, library))
     }
 
-    fn get_test_order(&self,
-                      library: &UnitLibrary)
-                      -> Result<Vec<UnitName>, UnitIncompatibleReason> {
+    pub fn get_test_order(&self,
+                          library: &UnitLibrary)
+                          -> Result<Vec<UnitName>, UnitIncompatibleReason> {
 
         // Create a new dependency graph
         let mut graph = Dependy::new();
@@ -240,22 +222,48 @@ impl ScenarioDescription {
         }
 
         let test_sequence_strings = graph.resolve_named_dependencies(&test_names)?;
-        let mut test_sequence = vec![];
-        for test_name in test_sequence_strings {
+        let mut test_order = vec![];
+        for test_name_string in test_sequence_strings {
             // Unwrap, because the name ought to be valid due to it being internally generated.
-            test_sequence.push(UnitName::from_str(test_name.as_str(), "test")
-                .expect("Invalid test name found"));
+            let test_name = UnitName::from_str(test_name_string.as_str(), "test")
+                .expect("Invalid test name generated");
+
+            // Only add the test to the test order if it's not an assumption.
+            if !self.assumptions.contains(&test_name) {
+                test_order.push(test_name);
+            }
         }
-        Ok(test_sequence)
+
+        // let test_order = trimmed_order;
+        Ok(test_order)
     }
 }
 
+pub struct Scenario {
+    name: UnitName,
+    test_sequence: Vec<Arc<Mutex<Test>>>,
+    tests: HashMap<UnitName, Arc<Mutex<Test>>>,
+}
+
 impl Scenario {
-    pub fn new(desc: &ScenarioDescription) -> Scenario {
+    pub fn new(desc: &ScenarioDescription,
+               test_order: Vec<UnitName>,
+               library: &UnitLibrary)
+               -> Scenario {
+
+        let mut tests = HashMap::new();
+        let mut test_sequence = vec![];
+
+        for test_name in test_order {
+            let test = library.get_test(&test_name).expect("Unable to check out requested test from library");
+            test_sequence.push(test.clone());
+            tests.insert(test_name, test);
+        }
+
         Scenario {
             name: desc.id.clone(),
-            tests: HashMap::new(),
-            test_sequence: vec![],
+            tests: tests,
+            test_sequence: test_sequence,
         }
     }
 
