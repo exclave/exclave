@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 
 use self::systemd_parser::items::DirectiveEntry;
-use self::dependy::Dependy;
+use self::dependy::{Dependy, Dependency};
 
 use config::Config;
 use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason,
@@ -35,7 +35,7 @@ impl AssumptionDependency {
     }
 }
 
-impl dependy::Dependency for AssumptionDependency {
+impl Dependency for AssumptionDependency {
     fn name(&self) -> &str {
         &self.name.as_str()
     }
@@ -187,7 +187,7 @@ impl ScenarioDescription {
         }
 
         // Create a new dependency graph
-        let mut graph = dependy::Dependy::new();
+        let mut graph = Dependy::new();
 
         // Add each possible test into the dependency graph
         {
