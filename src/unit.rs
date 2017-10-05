@@ -16,6 +16,7 @@ pub enum UnitKind {
     Jig,
     Scenario,
     Test,
+    Interface,
 }
 
 impl fmt::Display for UnitKind {
@@ -24,6 +25,7 @@ impl fmt::Display for UnitKind {
             &UnitKind::Jig => write!(f, "jig"),
             &UnitKind::Scenario => write!(f, "scenario"),
             &UnitKind::Test => write!(f, "test"),
+            &UnitKind::Interface => write!(f, "interface"),
         }
     }
 }
@@ -210,6 +212,7 @@ impl fmt::Display for UnitDeactivateError {
 pub enum UnitDescriptionError {
     InvalidUnitName(UnitNameError),
     MissingSection(String /* section name */),
+    MissingValue(String /* section name */, String /* key name */),
     FileOpenError(io::Error),
     ParseError(ParserError),
     RegexError(self::regex::Error),
@@ -248,21 +251,22 @@ impl fmt::Display for UnitDescriptionError {
         use std::error::Error;
         match self {
             &UnitDescriptionError::InvalidUnitName(ref reason) => {
-                write!(f, "Invalid unit name: {}", reason)
+                write!(f, "invalid unit name '{}'", reason)
             }
             &UnitDescriptionError::MissingSection(ref sec) => {
-                write!(f, "Missing [{}] section", sec)
+                write!(f, "missing [{}] section", sec)
             }
             &UnitDescriptionError::FileOpenError(ref e) => {
-                write!(f, "Unable to open file: {}", e.description())
+                write!(f, "unable to open file -- {}", e.description())
             }
             &UnitDescriptionError::ParseError(ref e) => {
-                write!(f, "Syntax error: {}", e.description())
+                write!(f, "syntax error: {}", e.description())
             }
-            &UnitDescriptionError::RegexError(ref e) => write!(f, "Unable to parse regex: {}", e),
+            &UnitDescriptionError::RegexError(ref e) => write!(f, "unable to parse regex: {}", e),
+            &UnitDescriptionError::MissingValue(ref sec, ref key) => write!(f, "key '{}' in section '{}' requires a value", key, sec),
             &UnitDescriptionError::InvalidValue(ref sec, ref key, ref val, ref allowed) => {
                 write!(f,
-                       "Key {} in section {} has invalid value: {}.  Value must be one of: {}",
+                       "key {} in section {} has invalid value: {}, must be one of: {}",
                        key,
                        sec,
                        val,

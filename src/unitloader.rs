@@ -4,9 +4,10 @@ use std::sync::{Arc, Mutex};
 
 use unit::{UnitName, UnitKind};
 use unitbroadcaster::{UnitBroadcaster, UnitEvent, UnitStatus, UnitStatusEvent};
+use units::interface::InterfaceDescription;
 use units::jig::JigDescription;
-use units::test::TestDescription;
 use units::scenario::ScenarioDescription;
+use units::test::TestDescription;
 use unitlibrary::UnitLibrary;
 
 pub struct UnitLoader {
@@ -73,7 +74,7 @@ impl UnitLoader {
             }
 
             &UnitKind::Test => {
-                // Ensure the jig is valid, has valid syntax, and can be loaded
+                // Ensure the test is valid, has valid syntax, and can be loaded
                 match TestDescription::from_path(path) {
                     Err(e) =>
                         self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_failed(name, format!("{}", e)))),
@@ -84,12 +85,23 @@ impl UnitLoader {
             }
 
             &UnitKind::Scenario => {
-                // Ensure the jig is valid, has valid syntax, and can be loaded
+                // Ensure the scenario is valid, has valid syntax, and can be loaded
                 match ScenarioDescription::from_path(path) {
                     Err(e) =>
                         self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_failed(name, format!("{}", e)))),
                     Ok(description) => {
                         self.library.lock().unwrap().update_scenario_description(description)
+                    }
+                }
+            }
+
+            &UnitKind::Interface => {
+                // Ensure the interface is valid, has valid syntax, and can be loaded
+                match InterfaceDescription::from_path(path) {
+                    Err(e) =>
+                        self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_failed(name, format!("{}", e)))),
+                    Ok(description) => {
+                        self.library.lock().unwrap().update_interface_description(description)
                     }
                 }
             }
@@ -101,9 +113,10 @@ impl UnitLoader {
 
     pub fn unload(&self, name: &UnitName, _: &PathBuf) {
         match name.kind() {
+            &UnitKind::Interface => self.library.lock().unwrap().remove_interface(name),
             &UnitKind::Jig => self.library.lock().unwrap().remove_jig(name),
-            &UnitKind::Test => self.library.lock().unwrap().remove_test(name),
             &UnitKind::Scenario => self.library.lock().unwrap().remove_scenario(name),
+            &UnitKind::Test => self.library.lock().unwrap().remove_test(name),
         }
     }
 }
