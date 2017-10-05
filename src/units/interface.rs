@@ -137,24 +137,31 @@ impl InterfaceDescription {
                   -> Result<Interface, UnitIncompatibleReason> {
         self.is_compatible(library, config)?;
 
-        Ok(Interface::new(self))
+        Ok(Interface::new(self, library, config))
     }
 }
 
 pub struct Interface {
     name: UnitName,
+    exec_start: String,
 }
 
 impl Interface {
-    pub fn new(desc: &InterfaceDescription) -> Interface {
-        Interface { name: desc.id.clone() }
+    pub fn new(desc: &InterfaceDescription, library: &UnitLibrary, config: &Config) -> Interface {
+        Interface {
+            name: desc.id.clone(),
+            exec_start: desc.exec_start.clone(),
+        }
     }
 
     pub fn name(&self) -> &UnitName {
         &self.name
     }
 
-    pub fn activate(&self) -> Result<(), UnitActivateError> {
+    pub fn activate(&self, config: &Config) -> Result<(), UnitActivateError> {
+        let mut running =
+            Runny::new(self.exec_start.as_str()).directory(&Some(config.working_directory().clone()))
+                .start()?;
         Ok(())
     }
 

@@ -193,7 +193,15 @@ impl From<DepError> for UnitIncompatibleReason {
     }
 }
 
-pub enum UnitActivateError {}
+pub enum UnitActivateError {
+    ExecFailed(RunnyError)
+}
+
+impl From<RunnyError> for UnitActivateError {
+    fn from(kind: RunnyError) -> Self {
+        UnitActivateError::ExecFailed(kind)
+    }
+}
 
 impl fmt::Display for UnitActivateError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

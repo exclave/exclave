@@ -443,7 +443,7 @@ impl UnitLibrary {
         self.broadcaster
             .broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected(description.id())));
 
-        if let Err(e) = new_interface.activate() {
+        if let Err(e) = new_interface.activate(&*self.config.lock().unwrap()) {
             self.broadcaster
             .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active_failed(description.id(), format!("{}", e))));
             return;
