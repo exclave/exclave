@@ -22,10 +22,6 @@ enum TestType {
     Daemon,
 }
 
-pub struct Test {
-    id: UnitName,
-}
-
 /// A struct defining an in-memory representation of a .test file
 pub struct TestDescription {
     /// The id of the unit (including the kind)
@@ -205,9 +201,21 @@ impl TestDescription {
     }
 }
 
+pub struct Test {
+    id: UnitName,
+    name_as_string: String,
+    requirements_as_string: Vec<String>,
+    suggestions_as_string: Vec<String>,
+    provides_as_string: Vec<String>,
+}
+
 impl Test {
     pub fn new(desc: &TestDescription) -> Test {
-        Test { id: desc.id.clone() }
+        Test { id: desc.id.clone(), name_as_string: desc.id.to_string(),
+        requirements_as_string: desc.requires.iter().map(|r| r.to_string()).collect(),
+        suggestions_as_string: desc.suggests.iter().map(|r| r.to_string()).collect(),
+        provides_as_string: desc.provides.iter().map(|r| r.to_string()).collect(),
+         }
     }
 
     pub fn activate(&self) -> Result<(), UnitActivateError> {
@@ -219,17 +227,17 @@ impl Test {
     }
 }
 
-impl dependy::Dependency for Test {
+impl Dependency for Test {
     fn name(&self) -> &str {
-        &self.id.as_str()
+        &self.name_as_string.as_str()
     }
     fn requirements(&self) -> &Vec<String> {
-        &self.requirements()
+        &self.requirements_as_string
     }
     fn suggestions(&self) -> &Vec<String> {
-        &self.suggestions()
+        &self.suggestions_as_string
     }
     fn provides(&self) -> &Vec<String> {
-        &self.provides()
+        &self.provides_as_string
     }
 }

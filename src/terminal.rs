@@ -56,7 +56,7 @@ impl TerminalInterface {
             while let Ok(event) = receiver.recv() {
                 ti.update_unit(event);
             }
-            println!("Received error from receiver");
+            eprintln!("Received error from receiver");
         });
     }
 

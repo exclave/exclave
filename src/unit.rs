@@ -1,3 +1,4 @@
+extern crate dependy;
 extern crate regex;
 extern crate runny;
 extern crate systemd_parser;
@@ -6,6 +7,7 @@ use std::fmt;
 use std::path::Path;
 use std::io;
 
+use self::dependy::DepError;
 use self::runny::RunnyError;
 use self::systemd_parser::errors::ParserError;
 
@@ -51,6 +53,10 @@ impl fmt::Display for UnitNameError {
 impl UnitName {
     pub fn kind(&self) -> &UnitKind {
         &self.kind
+    }
+
+    pub fn to_string(&self) -> String {
+        format!("{}", self)
     }
 
     pub fn from_path(path: &Path) -> Result<Self, UnitNameError> {
@@ -118,6 +124,7 @@ pub enum UnitIncompatibleReason {
     TestProgramFailed(String),
     TestFileNotPresent(String),
     IncompatibleJig,
+    DependencyError(DepError),
 }
 
 impl fmt::Display for UnitIncompatibleReason {
@@ -133,6 +140,28 @@ impl fmt::Display for UnitIncompatibleReason {
                 write!(f, "Test file {} not present", file_name)
             }
             &UnitIncompatibleReason::IncompatibleJig => write!(f, "Jig not compatible"),
+            &UnitIncompatibleReason::DependencyError(ref dep_error) => {
+                match dep_error {
+                    &DepError::RequirementsNotFound(ref req) => {
+                        write!(f, "Requirement '{}' not found", req)
+                    }
+                    &DepError::RequirementNotFound(ref req1, ref req2) => {
+                        write!(f, "Requirement {} not found for {}", req1, req2)
+                    }
+                    &DepError::SuggestionsNotFound(ref req) => {
+                        write!(f, "Suggestion '{}' not found", req)
+                    }
+                    &DepError::SuggestionNotFound(ref req1, ref req2) => {
+                        write!(f, "Suggestion {} not found for {}", req1, req2)
+                    }
+                    &DepError::DependencyNotFound(ref name) => {
+                        write!(f, "Dependency '{}' not found", name)
+                    }
+                    &DepError::CircularDependency(ref req1, ref req2) => {
+                        write!(f, "{} and {} have a circular dependency", req1, req2)
+                    }
+                }
+            }
         }
     }
 }
@@ -143,10 +172,21 @@ impl From<RunnyError> for UnitIncompatibleReason {
             RunnyError::NoCommandSpecified => {
                 UnitIncompatibleReason::TestProgramFailed("No command specified".to_owned())
             }
-            RunnyError::RunnyIoError(ref e) => UnitIncompatibleReason::TestProgramFailed(
-                format!("Error running test program: {}", e),
-            ),
+            RunnyError::RunnyIoError(ref e) => {
+                UnitIncompatibleReason::TestProgramFailed(format!("Error running test program: {}",
+                                                                  e))
+            }
+            #[cfg(unix)]
+            RunnyError::NixError(ref e) => {
+                UnitIncompatibleReason::TestProgramFailed(format!("Unix error {}", e))
+            }
         }
+    }
+}
+
+impl From<DepError> for UnitIncompatibleReason {
+    fn from(error: DepError) -> Self {
+        UnitIncompatibleReason::DependencyError(error)
     }
 }
 
@@ -172,12 +212,10 @@ pub enum UnitDescriptionError {
     FileOpenError(io::Error),
     ParseError(ParserError),
     RegexError(self::regex::Error),
-    InvalidValue(
-        String,      // Section name
-        String,      // Key name
-        String,      // Specified value
-        Vec<String>, /* Allowed values */
-    ),
+    InvalidValue(String, // Section name
+                 String, // Key name
+                 String, // Specified value
+                 Vec<String> /* Allowed values */),
 }
 
 impl From<UnitNameError> for UnitDescriptionError {
@@ -221,14 +259,14 @@ impl fmt::Display for UnitDescriptionError {
                 write!(f, "Syntax error: {}", e.description())
             }
             &UnitDescriptionError::RegexError(ref e) => write!(f, "Unable to parse regex: {}", e),
-            &UnitDescriptionError::InvalidValue(ref sec, ref key, ref val, ref allowed) => write!(
-                f,
-                "Key {} in section {} has invalid value: {}.  Value must be one of: {}",
-                key,
-                sec,
-                val,
-                allowed.join(",")
-            ),
+            &UnitDescriptionError::InvalidValue(ref sec, ref key, ref val, ref allowed) => {
+                write!(f,
+                       "Key {} in section {} has invalid value: {}.  Value must be one of: {}",
+                       key,
+                       sec,
+                       val,
+                       allowed.join(","))
+            }
         }
     }
 }

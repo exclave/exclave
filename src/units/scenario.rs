@@ -17,6 +17,39 @@ use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitInc
 use unitlibrary::UnitLibrary;
 use units::test::Test;
 
+struct AssumptionDependency {
+    name: String,
+    requirements: Vec<String>,
+    suggestions: Vec<String>,
+    provides: Vec<String>,
+}
+
+impl AssumptionDependency {
+    pub fn new(name: String) -> AssumptionDependency {
+        AssumptionDependency {
+            name: name,
+            requirements: vec![],
+            suggestions: vec![],
+            provides: vec![],
+        }
+    }
+}
+
+impl dependy::Dependency for AssumptionDependency {
+    fn name(&self) -> &str {
+        &self.name.as_str()
+    }
+    fn requirements(&self) -> &Vec<String> {
+        &self.requirements
+    }
+    fn suggestions(&self) -> &Vec<String> {
+        &self.suggestions
+    }
+    fn provides(&self) -> &Vec<String> {
+        &self.provides
+    }
+}
+
 pub struct Scenario {
     name: UnitName,
     test_sequence: Vec<Arc<Mutex<Test>>>,
@@ -154,25 +187,31 @@ impl ScenarioDescription {
         }
 
         // Create a new dependency graph
-        let mut graph = Dependy::new();
+        let mut graph = dependy::Dependy::new();
 
         // Add each possible test into the dependency graph
-        for test in &self.tests {
-            if self.assumptions.contains(test) {
-                let assumption_dep = AssumptionDependency::new(test);
-                graph.add_dependency(&assumption_dep);
-            } else {
-                graph.add_dependency(test.clone());
+        {
+            let tests_rc = library.get_tests();
+            let tests = tests_rc.borrow();
+            for (test_name, test) in tests.iter() {
+                if self.assumptions.contains(test_name) {
+                    let assumption_dep = AssumptionDependency::new(test_name.to_string());
+                    graph.add_dependency(&assumption_dep);
+                } else {
+                    graph.add_dependency(&*test.lock().unwrap());
+                }
             }
         }
 
-        test_set.debug(format!("Test names: {:?}", test_names));
-        let test_order = match graph.resolve_named_dependencies(&test_names) {
-            Ok(o) => o,
-            Err(e) => return Some(Err(ScenarioError::DependencyError(format!("{:?}", e)))),
-        };
-        test_set.debug(format!("Scenario {} vector order: {:?}", id, test_order));
+        {
+            let mut test_names = vec![];
+            for test_name in &self.tests {
+                test_names.push(test_name.to_string());
+            }
 
+            let test_order = graph.resolve_named_dependencies(&test_names)?;
+        }
+/*
         // Trim down the test list.  Remove anything that's just an assumption.
         let mut trimmed_order = vec![];
         for test in test_order {
@@ -183,7 +222,7 @@ impl ScenarioDescription {
             }
         }
         let test_order = trimmed_order;
-
+*/
         Ok(())
     }
 

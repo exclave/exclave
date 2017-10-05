@@ -1,10 +1,11 @@
-// This UnitLibrary contains all active, loaded modules.
-// When
+// This UnitLibrary contains all active, loaded modules, as well as the
+// "descriptions" that can be used to [re]load modules.
 
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use config::Config;
 use unit::{UnitKind, UnitName};
@@ -12,7 +13,6 @@ use unitbroadcaster::{UnitBroadcaster, UnitCategoryEvent, UnitEvent, UnitStatus,
 use units::jig::{Jig, JigDescription};
 use units::test::{Test, TestDescription};
 use units::scenario::{Scenario, ScenarioDescription};
-
 
 pub struct UnitLibrary {
     broadcaster: UnitBroadcaster,
@@ -40,7 +40,7 @@ pub struct UnitLibrary {
     jigs: RefCell<HashMap<UnitName, Arc<Mutex<Jig>>>>,
 
     /// Loaded Tests, available for checkout.
-    tests: RefCell<HashMap<UnitName, Arc<Mutex<Test>>>>,
+    tests: Rc<RefCell<HashMap<UnitName, Arc<Mutex<Test>>>>>,
 
     /// Loaded Scenarios, available for checkout.
     scenarios: RefCell<HashMap<UnitName, Arc<Mutex<Scenario>>>>,
@@ -63,7 +63,7 @@ impl UnitLibrary {
             dirty_scenarios: RefCell::new(HashMap::new()),
 
             jigs: RefCell::new(HashMap::new()),
-            tests: RefCell::new(HashMap::new()),
+            tests: Rc::new(RefCell::new(HashMap::new())),
             scenarios: RefCell::new(HashMap::new()),
         }
     }
@@ -293,6 +293,10 @@ impl UnitLibrary {
 
     pub fn jig_is_loaded(&self, id: &UnitName) -> bool {
         self.jigs.borrow().get(id).is_some()
+    }
+
+    pub fn get_tests(&self) -> Rc<RefCell<HashMap<UnitName, Arc<Mutex<Test>>>>> {
+        self.tests.clone()
     }
 
     fn load_jig(&self, description: &JigDescription) {
