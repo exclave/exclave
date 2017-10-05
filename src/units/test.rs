@@ -1,5 +1,5 @@
 extern crate systemd_parser;
-extern crate runny;
+extern crate dependy;
 extern crate regex;
 
 use std::path::Path;
@@ -7,6 +7,7 @@ use std::time::Duration;
 use std::io::Read;
 use std::fs::File;
 
+use self::dependy::Dependency;
 use self::regex::Regex;
 use self::systemd_parser::items::DirectiveEntry;
 
@@ -22,7 +23,7 @@ enum TestType {
 }
 
 pub struct Test {
-    name: UnitName,
+    id: UnitName,
 }
 
 /// A struct defining an in-memory representation of a .test file
@@ -40,11 +41,11 @@ pub struct TestDescription {
     jigs: Vec<UnitName>,
 
     /// A Vec<String> of test names that must successfully complete for this test to run.
-    requires: Vec<String>,
+    requires: Vec<UnitName>,
 
     /// A Vec<String> of test names that should be attempted first, though this test will still
     /// run even if they fail.
-    suggests: Vec<String>,
+    suggests: Vec<UnitName>,
 
     /// A Vec<String> of tests that this test implies.  This can be used for debugging tests
     /// that "fake" out things like OTP fuse blowing or device reformatting that you normally
@@ -206,7 +207,7 @@ impl TestDescription {
 
 impl Test {
     pub fn new(desc: &TestDescription) -> Test {
-        Test { name: desc.id.clone() }
+        Test { id: desc.id.clone() }
     }
 
     pub fn activate(&self) -> Result<(), UnitActivateError> {
@@ -215,5 +216,20 @@ impl Test {
 
     pub fn deactivate(&self) -> Result<(), UnitDeactivateError> {
         Ok(())
+    }
+}
+
+impl dependy::Dependency for Test {
+    fn name(&self) -> &str {
+        &self.id.as_str()
+    }
+    fn requirements(&self) -> &Vec<String> {
+        &self.requirements()
+    }
+    fn suggestions(&self) -> &Vec<String> {
+        &self.suggestions()
+    }
+    fn provides(&self) -> &Vec<String> {
+        &self.provides()
     }
 }

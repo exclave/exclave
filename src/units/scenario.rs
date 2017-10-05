@@ -1,5 +1,4 @@
-extern crate regex;
-extern crate runny;
+extern crate dependy;
 extern crate systemd_parser;
 
 use std::path::Path;
@@ -9,9 +8,8 @@ use std::fs::File;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 
-use self::regex::Regex;
 use self::systemd_parser::items::DirectiveEntry;
-use self::runny::Runny;
+use self::dependy::Dependy;
 
 use config::Config;
 use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason,
@@ -113,7 +111,7 @@ impl ScenarioDescription {
                             None => vec![],
                         }
                     }
-                    "Assumptions" => {
+                    "Assume" => {
                         scenario_description.assumptions = match directive.value() {
                             Some(s) => UnitName::from_list(s, "test")?,
                             None => vec![],
@@ -142,15 +140,51 @@ impl ScenarioDescription {
         library: &UnitLibrary,
         _: &Config,
     ) -> Result<(), UnitIncompatibleReason> {
-        if self.jigs.len() == 0 {
-            return Ok(());
-        }
-        for jig_name in &self.jigs {
-            if library.jig_is_loaded(&jig_name) {
-                return Ok(());
+        // If there is at least one jig present, ensure that it is loaded.
+        if self.jigs.len() > 0 {
+            let mut loaded = false;
+            for jig_name in &self.jigs {
+                if library.jig_is_loaded(&jig_name) {
+                    loaded = true;
+                }
+            }
+            if !loaded {
+                return Err(UnitIncompatibleReason::IncompatibleJig);
             }
         }
-        Err(UnitIncompatibleReason::IncompatibleJig)
+
+        // Create a new dependency graph
+        let mut graph = Dependy::new();
+
+        // Add each possible test into the dependency graph
+        for test in &self.tests {
+            if self.assumptions.contains(test) {
+                let assumption_dep = AssumptionDependency::new(test);
+                graph.add_dependency(&assumption_dep);
+            } else {
+                graph.add_dependency(test.clone());
+            }
+        }
+
+        test_set.debug(format!("Test names: {:?}", test_names));
+        let test_order = match graph.resolve_named_dependencies(&test_names) {
+            Ok(o) => o,
+            Err(e) => return Some(Err(ScenarioError::DependencyError(format!("{:?}", e)))),
+        };
+        test_set.debug(format!("Scenario {} vector order: {:?}", id, test_order));
+
+        // Trim down the test list.  Remove anything that's just an assumption.
+        let mut trimmed_order = vec![];
+        for test in test_order {
+            if !assumptions.contains(&test) {
+                trimmed_order.push(test);
+            } else {
+                test_set.debug(format!("Removing test {} since it's an assumption.", test));
+            }
+        }
+        let test_order = trimmed_order;
+
+        Ok(())
     }
 
     pub fn select(
