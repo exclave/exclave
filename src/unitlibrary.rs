@@ -295,6 +295,13 @@ impl UnitLibrary {
         self.jigs.borrow().get(id).is_some()
     }
 
+    pub fn get_test(&self, id: &UnitName) -> Option<Arc<Mutex<Test>>> {
+        match self.tests.borrow().get(id) {
+            None => None,
+            Some(test) => Some(test.clone())
+        }
+    }
+
     pub fn get_tests(&self) -> Rc<RefCell<HashMap<UnitName, Arc<Mutex<Test>>>>> {
         self.tests.clone()
     }
