@@ -34,6 +34,7 @@ pub struct UnitName {
     kind: UnitKind,
 }
 
+#[derive(Debug)]
 pub enum UnitNameError {
     NoFileExtension,
     UnrecognizedUnitType(String),
