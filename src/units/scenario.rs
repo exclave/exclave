@@ -124,34 +124,36 @@ impl ScenarioDescription {
 
         for entry in unit_file.lookup_by_category("Scenario") {
             match entry {
-                &DirectiveEntry::Solo(ref directive) => match directive.key() {
-                    "Name" => {
-                        scenario_description.name = directive.value().unwrap_or("").to_owned()
-                    }
-                    "Description" => {
-                        scenario_description.description =
-                            directive.value().unwrap_or("").to_owned()
-                    }
-                    "Jigs" => {
-                        scenario_description.jigs = match directive.value() {
-                            Some(s) => UnitName::from_list(s, "jig")?,
-                            None => vec![],
+                &DirectiveEntry::Solo(ref directive) => {
+                    match directive.key() {
+                        "Name" => {
+                            scenario_description.name = directive.value().unwrap_or("").to_owned()
                         }
-                    }
-                    "Tests" => {
-                        scenario_description.tests = match directive.value() {
-                            Some(s) => UnitName::from_list(s, "test")?,
-                            None => vec![],
+                        "Description" => {
+                            scenario_description.description =
+                                directive.value().unwrap_or("").to_owned()
                         }
-                    }
-                    "Assume" => {
-                        scenario_description.assumptions = match directive.value() {
-                            Some(s) => UnitName::from_list(s, "test")?,
-                            None => vec![],
+                        "Jigs" => {
+                            scenario_description.jigs = match directive.value() {
+                                Some(s) => UnitName::from_list(s, "jig")?,
+                                None => vec![],
+                            }
                         }
+                        "Tests" => {
+                            scenario_description.tests = match directive.value() {
+                                Some(s) => UnitName::from_list(s, "test")?,
+                                None => vec![],
+                            }
+                        }
+                        "Assume" => {
+                            scenario_description.assumptions = match directive.value() {
+                                Some(s) => UnitName::from_list(s, "test")?,
+                                None => vec![],
+                            }
+                        }
+                        &_ => (),
                     }
-                    &_ => (),
-                },
+                }
                 &_ => (),
             }
         }
@@ -168,11 +170,10 @@ impl ScenarioDescription {
     }
 
     /// Determine if a unit is compatible with this system.
-    pub fn is_compatible(
-        &self,
-        library: &UnitLibrary,
-        _: &Config,
-    ) -> Result<(), UnitIncompatibleReason> {
+    pub fn is_compatible(&self,
+                         library: &UnitLibrary,
+                         _: &Config)
+                         -> Result<(), UnitIncompatibleReason> {
         // If there is at least one jig present, ensure that it is loaded.
         if self.jigs.len() > 0 {
             let mut loaded = false;
@@ -185,6 +186,36 @@ impl ScenarioDescription {
                 return Err(UnitIncompatibleReason::IncompatibleJig);
             }
         }
+
+        // Build the dependency graph, but don't use the result.
+        // This is because right now, we're just concerned with
+        // whether the dependencies are satisfied.
+        self.get_test_order(library)?;
+        // Trim down the test list.  Remove anything that's just an assumption.
+        // let mut trimmed_order = vec![];
+        // for test in test_order {
+        // if !assumptions.contains(&test) {
+        // trimmed_order.push(test);
+        // } else {
+        // test_set.debug(format!("Removing test {} since it's an assumption.", test));
+        // }
+        // }
+        // let test_order = trimmed_order;
+        //
+        Ok(())
+    }
+
+    pub fn select(&self,
+                  library: &UnitLibrary,
+                  config: &Config)
+                  -> Result<Scenario, UnitIncompatibleReason> {
+        self.is_compatible(library, config)?;
+        Ok(Scenario::new(self))
+    }
+
+    fn get_test_order(&self,
+                      library: &UnitLibrary)
+                      -> Result<Vec<UnitName>, UnitIncompatibleReason> {
 
         // Create a new dependency graph
         let mut graph = Dependy::new();
@@ -203,36 +234,19 @@ impl ScenarioDescription {
             }
         }
 
-        {
-            let mut test_names = vec![];
-            for test_name in &self.tests {
-                test_names.push(test_name.to_string());
-            }
-
-            let test_order = graph.resolve_named_dependencies(&test_names)?;
+        let mut test_names = vec![];
+        for test_name in &self.tests {
+            test_names.push(test_name.to_string());
         }
-/*
-        // Trim down the test list.  Remove anything that's just an assumption.
-        let mut trimmed_order = vec![];
-        for test in test_order {
-            if !assumptions.contains(&test) {
-                trimmed_order.push(test);
-            } else {
-                test_set.debug(format!("Removing test {} since it's an assumption.", test));
-            }
-        }
-        let test_order = trimmed_order;
-*/
-        Ok(())
-    }
 
-    pub fn select(
-        &self,
-        library: &UnitLibrary,
-        config: &Config,
-    ) -> Result<Scenario, UnitIncompatibleReason> {
-        self.is_compatible(library, config)?;
-        Ok(Scenario::new(self))
+        let test_sequence_strings = graph.resolve_named_dependencies(&test_names)?;
+        let mut test_sequence = vec![];
+        for test_name in test_sequence_strings {
+            // Unwrap, because the name ought to be valid due to it being internally generated.
+            test_sequence.push(UnitName::from_str(test_name.as_str(), "test")
+                .expect("Invalid test name found"));
+        }
+        Ok(test_sequence)
     }
 }
 
