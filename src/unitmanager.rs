@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::thread;
 
 use config::Config;
-use unit::{UnitKind, UnitName};
+use unit::UnitName;
 use unitbroadcaster::{UnitBroadcaster, UnitCategoryEvent, UnitEvent, UnitStatus, UnitStatusEvent};
 use units::interface::{Interface, InterfaceDescription};
 use units::jig::{Jig, JigDescription};
@@ -18,9 +19,28 @@ pub enum ManagerStatusMessage {
 }
 
 /// Messages for Unit -> Library communication
-pub enum ManagerControlMessage {
+#[derive(PartialEq, Eq, Hash, Debug, Clone)]
+pub enum ManagerControlMessageContents {
     /// Get a list of compatible, Selected scenarios.
     Scenarios,
+
+    /// Client sent an unimplemented message.
+    Unimplemented(String),
+}
+
+#[derive(PartialEq, Eq, Hash, Debug, Clone)]
+pub struct ManagerControlMessage {
+    sender: UnitName,
+    contents: ManagerControlMessageContents,
+}
+
+impl ManagerControlMessage {
+    pub fn new(id: &UnitName, contents: ManagerControlMessageContents) -> Self {
+        ManagerControlMessage {
+            sender: id.clone(),
+            contents: contents,
+        }
+    }
 }
 
 pub struct UnitManager {
@@ -38,10 +58,18 @@ pub struct UnitManager {
 
     /// Loaded Tests, available for checkout.
     tests: Rc<RefCell<HashMap<UnitName, Arc<Mutex<Test>>>>>,
+
+    /// Prototypical message sender that will be cloned and passed to each new unit.
+    control_sender: Sender<ManagerControlMessage>,
 }
 
 impl UnitManager {
     pub fn new(broadcaster: &UnitBroadcaster, config: &Arc<Mutex<Config>>) -> Self {
+        let (sender, receiver) = channel();
+
+        let monitor_broadcaster = broadcaster.clone();
+        thread::spawn(move || Self::control_message_monitor(receiver, monitor_broadcaster));
+
         UnitManager {
             cfg: config.clone(),
             bc: broadcaster.clone(),
@@ -50,7 +78,20 @@ impl UnitManager {
             jigs: RefCell::new(HashMap::new()),
             scenarios: Rc::new(RefCell::new(HashMap::new())),
             tests: Rc::new(RefCell::new(HashMap::new())),
+
+            control_sender: sender,
         }
+    }
+
+    /// Runs in a separate thread and consolidates control messages
+    fn control_message_monitor(receiver: Receiver<ManagerControlMessage>, broadcaster: UnitBroadcaster) {
+        while let Ok(msg) = receiver.recv() {
+            broadcaster.broadcast(&UnitEvent::ManagerRequest(msg));
+        }
+    }
+
+    pub fn get_control_channel(&self) -> Sender<ManagerControlMessage> {
+        self.control_sender.clone()
     }
 
     pub fn load_interface(&self, description: &InterfaceDescription) {
@@ -71,7 +112,7 @@ impl UnitManager {
         }
 
         // "Select" the Interface, which means we can activate it later on.
-        let new_interface = match description.select(self, &*self.cfg.lock().unwrap()) {
+        let mut new_interface = match description.select(self, &*self.cfg.lock().unwrap()) {
             Ok(o) => o,
             Err(e) => {
                 self.bc.broadcast(
@@ -88,9 +129,7 @@ impl UnitManager {
         self.bc
             .broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected(description.id())));
 
-        let (sender, receiver) = channel();
-
-        let interface_rx = match new_interface.activate(receiver, &*self.cfg.lock().unwrap()) {
+        let interface_rx = match new_interface.activate(self, &*self.cfg.lock().unwrap()) {
             Err(e) => {
             self.bc
             .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active_failed(description.id(), format!("{}", e))));

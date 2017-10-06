@@ -1,19 +1,23 @@
 extern crate runny;
 extern crate systemd_parser;
 
+use std::cell::RefCell;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{Read, Write, BufRead, BufReader};
 use std::path::Path;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::thread;
 
 use config::Config;
 use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason,
            UnitName};
-use unitmanager::{UnitManager, ManagerStatusMessage, ManagerControlMessage};
+use unitmanager::{UnitManager, ManagerStatusMessage, ManagerControlMessage, ManagerControlMessageContents};
 
 use self::systemd_parser::items::DirectiveEntry;
-use self::runny::Runny;
+use self::runny::{Runny};
+use self::runny::running::{Running, RunningOutput};
 
+#[derive(Clone, Copy)]
 enum InterfaceFormat {
     Text,
     JSON,
@@ -152,25 +156,29 @@ impl InterfaceDescription {
 }
 
 pub struct Interface {
-    name: UnitName,
+    id: UnitName,
     exec_start: String,
+    format: InterfaceFormat,
+    process: RefCell<Option<Running>>,
 }
 
 impl Interface {
     pub fn new(desc: &InterfaceDescription, manager: &UnitManager, config: &Config) -> Interface {
         Interface {
-            name: desc.id.clone(),
+            id: desc.id.clone(),
             exec_start: desc.exec_start.clone(),
+            format: desc.format,
+            process: RefCell::new(None),
         }
     }
 
-    pub fn name(&self) -> &UnitName {
-        &self.name
+    pub fn id(&self) -> &UnitName {
+        &self.id
     }
 
     pub fn activate(
         &self,
-        unit_status_rx: Receiver<ManagerStatusMessage>,
+        manager: &UnitManager,
         config: &Config,
     ) -> Result<Receiver<ManagerControlMessage>, UnitActivateError> {
         let (sender, receiver) = channel();
@@ -178,6 +186,25 @@ impl Interface {
         let mut running = Runny::new(self.exec_start.as_str())
             .directory(&Some(config.working_directory().clone()))
             .start()?;
+
+        let stdout = running.take_output();
+
+        let control_sender = manager.get_control_channel();
+        let control_sender_id = self.id().clone();
+        match self.format {
+            InterfaceFormat::Text => {
+
+                // Send some initial information to the client.
+                writeln!(running, "HELLO Jig/20 1.0").unwrap();
+
+                thread::spawn(move || Self::text_read(control_sender_id, control_sender, stdout));
+            }
+            InterfaceFormat::JSON => {
+                ();
+            }
+        };
+
+        *self.process.borrow_mut() = Some(running);
 
         Ok(receiver)
     }
@@ -187,12 +214,18 @@ impl Interface {
     }
 
     /// Write a UnitInterfaceMessage to a Text-formatted output.
-    fn text_write<T>(stdin: &mut T, msg: ManagerStatusMessage) -> Result<(), String>
-    where
-        T: Write,
+    pub fn text_write(&self, msg: ManagerStatusMessage) -> Result<(), String>
     {
+        let mut process_opt = self.process.borrow_mut();
+
+        if process_opt.is_none() {
+            return Err("No process running".to_owned());
+        }
+
+        let process = process_opt.as_mut().unwrap();
+
         let result = match msg {
-            ManagerStatusMessage::Jig(j) => writeln!(stdin, "JIG {}", j.to_string()),
+            ManagerStatusMessage::Jig(j) => writeln!(process, "JIG {}", j.to_string()),
             /*
             BroadcastMessageContents::Log(l) => writeln!(
                 stdin,
@@ -242,6 +275,65 @@ impl Interface {
         match result {
             Ok(_) => Ok(()),
             Err(e) => Err(format!("{:?}", e)),
+        }
+    }
+
+    fn cfti_unescape(msg: String) -> String {
+        msg.replace("\\t", "\t").replace("\\n", "\n").replace("\\r", "\r").replace("\\\\", "\\")
+    }
+
+    fn text_read(id: UnitName, control: Sender<ManagerControlMessage>, stdout: RunningOutput) {
+        for line in BufReader::new(stdout).lines() {
+            let line = line.expect("Unable to get next line");
+            let mut words: Vec<String> =
+                line.split_whitespace().map(|x| Self::cfti_unescape(x.to_string())).collect();
+
+            // Don't crash if we get a blank line.
+            if words.len() == 0 {
+                continue;
+            }
+
+            let verb = words[0].to_lowercase();
+            words.remove(0);
+
+            let response = match verb.as_str() {
+                "scenarios" => ManagerControlMessageContents::Scenarios,
+                /*
+                "scenario" => ControlMessageContents::Scenario(words[0].to_lowercase()),
+                "tests" => {
+                    if words.is_empty() {
+                        ControlMessageContents::GetTests(None)
+                    } else {
+                        ControlMessageContents::GetTests(Some(words[0].to_lowercase()))
+                    }
+                }
+                "start" => {
+                    if words.is_empty() {
+                        ControlMessageContents::StartScenario(None)
+                    } else {
+                        ControlMessageContents::StartScenario(Some(words[0].to_lowercase()))
+                    }
+                }
+                "abort" => ControlMessageContents::AbortTests,
+                "pong" => ControlMessageContents::Pong(words[0].to_lowercase()),
+                "jig" => ControlMessageContents::GetJig,
+                "hello" => ControlMessageContents::Hello(words.join(" ")),
+                "shutdown" => {
+                    if words.is_empty() {
+                        ControlMessageContents::Shutdown(None)
+                    } else {
+                        ControlMessageContents::Shutdown(Some(words.join(" ")))
+                    }
+                }
+                "log" => ControlMessageContents::Log(words.join(" ")),
+                */
+                v => ManagerControlMessageContents::Unimplemented(format!("Unimplemented verb: {}", v)),
+            };
+
+            // If the send fails, that means the other end has closed the pipe.
+            if let Err(_) = control.send(ManagerControlMessage::new(&id, response)) {
+                return;
+            }
         }
     }
 }

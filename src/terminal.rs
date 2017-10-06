@@ -81,6 +81,7 @@ impl TerminalInterface {
             UnitEvent::RescanStart => (),
             UnitEvent::RescanFinish => (),
             UnitEvent::Shutdown => (),
+            UnitEvent::ManagerRequest(_) => (),
         }
 
         match self.output_type {
@@ -97,6 +98,7 @@ impl TerminalInterface {
             UnitEvent::RescanStart => println!("Started unit recsan..."),
             UnitEvent::RescanFinish => println!("Finished rescanning units"),
             UnitEvent::Shutdown => println!("Shutting down"),
+            UnitEvent::ManagerRequest(_) => (),
         };
     }
 

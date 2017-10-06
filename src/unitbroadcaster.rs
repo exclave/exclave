@@ -3,6 +3,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::fmt;
 
+use unitmanager::ManagerControlMessage;
 use unit::{UnitKind, UnitName};
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
@@ -239,6 +240,9 @@ pub enum UnitEvent {
 
     /// The rescan has finished.
     RescanFinish,
+
+    /// A unit made a request to a Manager, which will be passed to the main thread.
+    ManagerRequest(ManagerControlMessage),
 
     /// The system is shutting down.
     Shutdown,

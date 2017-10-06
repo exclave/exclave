@@ -44,6 +44,7 @@ impl UnitLoader {
                 UnitEvent::RescanStart => (),
                 UnitEvent::RescanFinish => (),
                 UnitEvent::Category(_) => (),
+                UnitEvent::ManagerRequest(_) => (),
             }
         }
     }
