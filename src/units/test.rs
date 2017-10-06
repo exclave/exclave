@@ -14,7 +14,7 @@ use self::systemd_parser::items::DirectiveEntry;
 use config::Config;
 use unit::{UnitName, UnitActivateError, UnitDeactivateError,
            UnitIncompatibleReason, UnitDescriptionError};
-use unitlibrary::UnitLibrary;
+use unitmanager::UnitManager;
 
 #[derive(Debug, PartialEq)]
 enum TestType {
@@ -181,12 +181,12 @@ impl TestDescription {
     }
 
     /// Determine if a unit is compatible with this system.
-    pub fn is_compatible(&self, library: &UnitLibrary, _: &Config) -> Result<(), UnitIncompatibleReason> {
+    pub fn is_compatible(&self, manager: &UnitManager, _: &Config) -> Result<(), UnitIncompatibleReason> {
         if self.jigs.len() == 0 {
             return Ok(());
         }
         for jig_name in &self.jigs {
-            if library.jig_is_loaded(&jig_name) {
+            if manager.jig_is_loaded(&jig_name) {
                 return Ok(());
             }
         }
@@ -194,9 +194,9 @@ impl TestDescription {
     }
 
     pub fn select(&self, 
-        library: &UnitLibrary,
+        manager: &UnitManager,
         config: &Config) -> Result<Test, UnitIncompatibleReason> {
-        self.is_compatible(library, config)?;
+        self.is_compatible(manager, config)?;
         Ok(Test::new(self))
     }
 }

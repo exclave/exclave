@@ -4,11 +4,12 @@ extern crate clap;
 use std::sync::{Arc, Mutex};
 
 mod unit;
-mod units;
 mod unitbroadcaster;
-mod unitloader;
-mod unitwatcher;
 mod unitlibrary;
+mod unitloader;
+mod unitmanager;
+mod units;
+mod unitwatcher;
 mod terminal;
 mod config;
 

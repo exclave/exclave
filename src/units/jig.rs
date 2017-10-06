@@ -8,7 +8,7 @@ use std::fs::File;
 use config::Config;
 use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason,
            UnitName};
-use unitlibrary::UnitLibrary;
+use unitmanager::UnitManager;
 
 use self::systemd_parser::items::DirectiveEntry;
 use self::runny::Runny;
@@ -95,7 +95,7 @@ impl JigDescription {
     /// Returns Ok(()) if it is, and Err(String) if not.
     pub fn is_compatible(
         &self,
-        _: &UnitLibrary,
+        _: &UnitManager,
         config: &Config,
     ) -> Result<(), UnitIncompatibleReason> {
         // If this Jig has a file-existence test, run it.
@@ -141,10 +141,10 @@ impl JigDescription {
 
     pub fn select(
         &self,
-        library: &UnitLibrary,
+        manager: &UnitManager,
         config: &Config,
     ) -> Result<Jig, UnitIncompatibleReason> {
-        self.is_compatible(library, config)?;
+        self.is_compatible(manager, config)?;
 
         Ok(Jig::new(self))
     }

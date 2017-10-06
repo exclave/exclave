@@ -14,7 +14,7 @@ use self::dependy::{Dependy, Dependency};
 use config::Config;
 use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason,
            UnitName};
-use unitlibrary::UnitLibrary;
+use unitmanager::UnitManager;
 use units::test::Test;
 
 struct AssumptionDependency {
@@ -165,14 +165,14 @@ impl ScenarioDescription {
 
     /// Determine if a unit is compatible with this system.
     pub fn is_compatible(&self,
-                         library: &UnitLibrary,
+                         manager: &UnitManager,
                          _: &Config)
                          -> Result<Vec<UnitName>, UnitIncompatibleReason> {
         // If there is at least one jig present, ensure that it is loaded.
         if self.jigs.len() > 0 {
             let mut loaded = false;
             for jig_name in &self.jigs {
-                if library.jig_is_loaded(&jig_name) {
+                if manager.jig_is_loaded(&jig_name) {
                     loaded = true;
                 }
             }
@@ -184,19 +184,19 @@ impl ScenarioDescription {
         // Build the dependency graph, but don't use the result.
         // This is because right now, we're just concerned with
         // whether the dependencies are satisfied.
-        self.get_test_order(library)
+        self.get_test_order(manager)
     }
 
     pub fn select(&self,
-                  library: &UnitLibrary,
+                  manager: &UnitManager,
                   config: &Config)
                   -> Result<Scenario, UnitIncompatibleReason> {
-        let test_order = self.is_compatible(library, config)?;
-        Ok(Scenario::new(self, test_order, library))
+        let test_order = self.is_compatible(manager, config)?;
+        Ok(Scenario::new(self, test_order, manager))
     }
 
     pub fn get_test_order(&self,
-                          library: &UnitLibrary)
+                          manager: &UnitManager)
                           -> Result<Vec<UnitName>, UnitIncompatibleReason> {
 
         // Create a new dependency graph
@@ -204,7 +204,7 @@ impl ScenarioDescription {
 
         // Add each possible test into the dependency graph
         {
-            let tests_rc = library.get_tests();
+            let tests_rc = manager.get_tests();
             let tests = tests_rc.borrow();
             for (test_name, test) in tests.iter() {
                 if self.assumptions.contains(test_name) {
@@ -248,14 +248,14 @@ pub struct Scenario {
 impl Scenario {
     pub fn new(desc: &ScenarioDescription,
                test_order: Vec<UnitName>,
-               library: &UnitLibrary)
+               manager: &UnitManager)
                -> Scenario {
 
         let mut tests = HashMap::new();
         let mut test_sequence = vec![];
 
         for test_name in test_order {
-            let test = library.get_test(&test_name).expect("Unable to check out requested test from library");
+            let test = manager.get_test(&test_name).expect("Unable to check out requested test from library");
             test_sequence.push(test.clone());
             tests.insert(test_name, test);
         }
