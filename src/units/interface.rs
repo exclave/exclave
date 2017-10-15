@@ -197,6 +197,8 @@ impl Interface {
                 // Send some initial information to the client.
                 writeln!(running, "HELLO Jig/20 1.0").unwrap();
 
+                // Pass control to an out-of-object thread, and shuttle communications
+                // from stdout onto the control_sender channel.
                 thread::spawn(move || Self::text_read(control_sender_id, control_sender, stdout));
             }
             InterfaceFormat::JSON => {
@@ -213,8 +215,20 @@ impl Interface {
         Ok(())
     }
 
+    /// Cause a MessageControlContents to be written out.
+    pub fn output_message(&self, msg: ManagerStatusMessage) -> Result<(), String> {
+        match self.format {
+            InterfaceFormat::Text => self.text_write(msg),
+            InterfaceFormat::JSON => self.json_write(msg),
+        }
+    }
+
+    fn json_write(&self, msg: ManagerStatusMessage) -> Result<(), String> {
+        unimplemented!();
+    }
+
     /// Write a UnitInterfaceMessage to a Text-formatted output.
-    pub fn text_write(&self, msg: ManagerStatusMessage) -> Result<(), String>
+    fn text_write(&self, msg: ManagerStatusMessage) -> Result<(), String>
     {
         let mut process_opt = self.process.borrow_mut();
 
@@ -226,6 +240,13 @@ impl Interface {
 
         let result = match msg {
             ManagerStatusMessage::Jig(j) => writeln!(process, "JIG {}", j.to_string()),
+            ManagerStatusMessage::Scenarios(list) => {
+                write!(process, "SCENARIOS");
+                for test_name in list {
+                    write!(process, " {}", test_name);
+                }
+                writeln!(process, "")
+            }
             /*
             BroadcastMessageContents::Log(l) => writeln!(
                 stdin,
@@ -245,9 +266,6 @@ impl Interface {
                 writeln!(stdin, "DESCRIBE {} {} {} {}", class, field, name, value)
             }
             BroadcastMessageContents::Scenario(name) => writeln!(stdin, "SCENARIO {}", name),
-            BroadcastMessageContents::Scenarios(list) => {
-                writeln!(stdin, "SCENARIOS {}", list.join(" "))
-            }
             //            BroadcastMessageContents::Hello(name) => writeln!(stdin,
             //                                                "HELLO {}", name),
             //            BroadcastMessageContents::Ping(val) => writeln!(stdin,

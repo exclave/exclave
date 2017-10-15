@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use config::Config;
-use unit::UnitName;
+use unit::{UnitName, UnitKind};
 use unitbroadcaster::{UnitBroadcaster, UnitCategoryEvent, UnitEvent, UnitStatus, UnitStatusEvent};
 use units::interface::{Interface, InterfaceDescription};
 use units::jig::{Jig, JigDescription};
@@ -15,7 +15,11 @@ use units::test::{Test, TestDescription};
 
 /// Messages for Library -> Unit communication
 pub enum ManagerStatusMessage {
+    /// Return the first name of the jig we're running on.
     Jig(UnitName /* Name of the jig */),
+
+    /// Return a list of known scenarios.
+    Scenarios(Vec<UnitName>),
 }
 
 /// Messages for Unit -> Library communication
@@ -48,7 +52,7 @@ pub struct UnitManager {
     bc: UnitBroadcaster,
 
     /// Loaded Interfaces, available for checkout.
-    interfaces: RefCell<HashMap<UnitName, Arc<Mutex<Interface>>>>,
+    interfaces: RefCell<HashMap<UnitName, Interface>>,
 
     /// Loaded Jigs, available for checkout.
     jigs: RefCell<HashMap<UnitName, Arc<Mutex<Jig>>>>,
@@ -97,7 +101,7 @@ impl UnitManager {
     pub fn load_interface(&self, description: &InterfaceDescription) {
         // If the interface exists in the array already, then it is active and will be deactivated first.
         if let Some(old_interface) = self.interfaces.borrow_mut().remove(description.id()) {
-            match old_interface.lock().unwrap().deactivate() {
+            match old_interface.deactivate() {
                 Ok(_) =>
             self.bc.broadcast(
                     &UnitEvent::Status(UnitStatusEvent::new_deactivate_success(description.id(), "Reloading interface".to_owned()))),
@@ -138,13 +142,14 @@ impl UnitManager {
             Ok(i) => i,
         };
 
+        // Announce that the interface was successfully started.
         self.bc
             .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(description.id())));
 
         self.interfaces
             .borrow_mut()
             .insert(description.id().clone(),
-                    Arc::new(Mutex::new(new_interface)));
+                    new_interface);
     }
 
 
@@ -252,5 +257,27 @@ impl UnitManager {
 
     pub fn get_scenarios(&self) -> Rc<RefCell<HashMap<UnitName, Arc<Mutex<Scenario>>>>> {
         self.scenarios.clone()
+    }
+
+    pub fn process_message(&self, msg: &UnitEvent) {
+        match msg {
+            &UnitEvent::ManagerRequest(ref req) => self.manager_request(req),
+            _ => (),
+        }
+    }
+
+    fn manager_request(&self, msg: &ManagerControlMessage) {
+        let &ManagerControlMessage {sender: ref sender_name, contents: ref msg} = msg;
+
+        let response = match *msg {
+            ManagerControlMessageContents::Scenarios => ManagerStatusMessage::Scenarios(self.scenarios.borrow().keys().map(|x| x.clone()).collect()),
+            ManagerControlMessageContents::Unimplemented(_) => return,
+        };
+
+        match *sender_name.kind() {
+            UnitKind::Interface => 
+                self.interfaces.borrow().get(sender_name).expect("Unable to find Interface in the library").output_message(response),
+            _ => Ok(()),
+        }.expect("Unable to pass message to client");
     }
 }

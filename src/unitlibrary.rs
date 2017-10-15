@@ -17,7 +17,6 @@ use units::test::{TestDescription};
 
 pub struct UnitLibrary {
     broadcaster: UnitBroadcaster,
-    receiver: Receiver<UnitEvent>,
 
     /// The unit status is used to determine whether to reload units or not.
     unit_status: RefCell<HashMap<UnitName, UnitStatus>>,
@@ -40,6 +39,7 @@ pub struct UnitLibrary {
     dirty_scenarios: RefCell<HashMap<UnitName, ()>>,
     dirty_tests: RefCell<HashMap<UnitName, ()>>,
 
+    /// The object in charge of keeping track of units in-memory.
     unit_manager: RefCell<UnitManager>,
 }
 
@@ -47,7 +47,6 @@ impl UnitLibrary {
     pub fn new(broadcaster: &UnitBroadcaster, config: &Arc<Mutex<Config>>) -> Self {
         UnitLibrary {
             broadcaster: broadcaster.clone(),
-            receiver: broadcaster.subscribe(),
             unit_status: RefCell::new(HashMap::new()),
 
             interface_descriptions: RefCell::new(HashMap::new()),
@@ -364,5 +363,9 @@ impl UnitLibrary {
         self.dirty_scenarios.borrow_mut().clear();
 
         self.broadcaster.broadcast(&UnitEvent::RescanFinish);
+    }
+
+    pub fn process_message(&self, msg: &UnitEvent) {
+        self.unit_manager.borrow().process_message(msg);
     }
 }

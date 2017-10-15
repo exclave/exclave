@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 
 use unit::{UnitName, UnitKind};
@@ -12,7 +11,6 @@ use unitlibrary::UnitLibrary;
 
 pub struct UnitLoader {
     broadcaster: UnitBroadcaster,
-    receiver: Receiver<UnitEvent>,
     library: Arc<Mutex<UnitLibrary>>,
 }
 
@@ -22,7 +20,6 @@ impl UnitLoader {
                -> Self {
         UnitLoader {
             broadcaster: broadcaster.clone(),
-            receiver: broadcaster.subscribe(),
             library: library.clone(),
         }
     }
@@ -36,16 +33,14 @@ impl UnitLoader {
         }
     }
 
-    pub fn process_messages(&self) {
-        while let Ok(msg) = self.receiver.recv() {
-            match msg {
-                UnitEvent::Shutdown => return,
-                UnitEvent::Status(evt) => self.handle_status(&evt),
-                UnitEvent::RescanStart => (),
-                UnitEvent::RescanFinish => (),
-                UnitEvent::Category(_) => (),
-                UnitEvent::ManagerRequest(_) => (),
-            }
+    pub fn process_message(&self, msg: &UnitEvent) {
+        match msg {
+            &UnitEvent::Shutdown => return,
+            &UnitEvent::Status(ref evt) => self.handle_status(evt),
+            &UnitEvent::RescanStart => (),
+            &UnitEvent::RescanFinish => (),
+            &UnitEvent::Category(_) => (),
+            &UnitEvent::ManagerRequest(_) => (),
         }
     }
 

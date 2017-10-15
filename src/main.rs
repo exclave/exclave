@@ -75,5 +75,10 @@ fn main() {
         unit_watcher.add_path(config_dir).expect("Unable to add config directory");
     }
 
-    unit_loader.process_messages();
+    // Main message loop.  Monitor messages and pass them to each component.
+    let message_receiver = unit_broadcaster.subscribe();
+    while let Ok(msg) = message_receiver.recv() {
+        unit_loader.process_message(&msg);
+        unit_library.lock().unwrap().process_message(&msg);
+    }
 }
