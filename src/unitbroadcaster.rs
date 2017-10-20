@@ -15,7 +15,7 @@ pub enum UnitStatus {
     Updated(PathBuf),
 
     /// We started to load the unit file
-    LoadStarted,
+    LoadStarted(PathBuf /* path to the unit file that's gong away */),
 
     /// The unit file failed to load for some reason
     LoadFailed(String /* reason */),
@@ -42,10 +42,10 @@ pub enum UnitStatus {
     DeactivatedUnsuccessfully(String /* reason */),
 
     /// The unit already successfully loaded, but is being removed
-    UnloadStarted,
+    UnloadStarted(PathBuf /* path to the unit file that's gong away */),
 
     /// The unit already successfully loaded, but is being updated
-    UpdateStarted,
+    UpdateStarted(PathBuf /* path to the unit file that's gong away */),
 
     /// The unit file was removed from the disk
     Removed(PathBuf),
@@ -56,7 +56,7 @@ impl fmt::Display for UnitStatus {
         match self {
             &UnitStatus::Added(ref path) => write!(f, "Added {}", path.to_string_lossy()),
             &UnitStatus::Updated(ref path) => write!(f, "Updated {}", path.to_string_lossy()),
-            &UnitStatus::LoadStarted => write!(f, "Load started"),
+            &UnitStatus::LoadStarted(ref path) => write!(f, "Load started {}", path.to_string_lossy()),
             &UnitStatus::LoadFailed(ref x) => write!(f, "Load failed: {}", x),
             &UnitStatus::Incompatible(ref x) => write!(f, "Incompatible: {}", x),
             &UnitStatus::Selected => write!(f, "Selected"),
@@ -69,8 +69,8 @@ impl fmt::Display for UnitStatus {
             &UnitStatus::DeactivatedUnsuccessfully(ref x) => {
                 write!(f, "Deactivated unsuccessfilly: {}", x)
             }
-            &UnitStatus::UnloadStarted => write!(f, "Unloading"),
-            &UnitStatus::UpdateStarted => write!(f, "Updating"),
+            &UnitStatus::UnloadStarted(ref path) => write!(f, "Unloading {}", path.to_string_lossy()),
+            &UnitStatus::UpdateStarted(ref path) => write!(f, "Updating {}", path.to_string_lossy()),
             &UnitStatus::Removed(ref path) => write!(f, "Removed {}", path.to_string_lossy()),
         }
     }
@@ -133,17 +133,17 @@ impl UnitStatusEvent {
         }
     }
 
-    pub fn new_load_started(name: &UnitName) -> UnitStatusEvent {
+    pub fn new_load_started(name: &UnitName, path: &PathBuf) -> UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
-            status: UnitStatus::LoadStarted,
+            status: UnitStatus::LoadStarted(path.clone()),
         }
     }
 
-    pub fn new_update_started(name: &UnitName) -> UnitStatusEvent {
+    pub fn new_update_started(name: &UnitName, path: &PathBuf) -> UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
-            status: UnitStatus::UpdateStarted,
+            status: UnitStatus::UpdateStarted(path.clone()),
         }
     }
 
@@ -196,10 +196,10 @@ impl UnitStatusEvent {
         }
     }
 
-    pub fn new_unloading(name: &UnitName) -> UnitStatusEvent {
+    pub fn new_unload_started(name: &UnitName, path: &PathBuf) -> UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
-            status: UnitStatus::UnloadStarted,
+            status: UnitStatus::UnloadStarted(path.clone()),
         }
     }
 }

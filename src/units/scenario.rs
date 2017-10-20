@@ -18,14 +18,14 @@ use unitmanager::UnitManager;
 use units::test::Test;
 
 struct AssumptionDependency {
-    name: String,
-    requirements: Vec<String>,
-    suggestions: Vec<String>,
-    provides: Vec<String>,
+    name: UnitName,
+    requirements: Vec<UnitName>,
+    suggestions: Vec<UnitName>,
+    provides: Vec<UnitName>,
 }
 
 impl AssumptionDependency {
-    pub fn new(name: String) -> AssumptionDependency {
+    pub fn new(name: UnitName) -> AssumptionDependency {
         AssumptionDependency {
             name: name,
             requirements: vec![],
@@ -35,17 +35,17 @@ impl AssumptionDependency {
     }
 }
 
-impl Dependency for AssumptionDependency {
-    fn name(&self) -> &str {
-        &self.name.as_str()
+impl Dependency<UnitName> for AssumptionDependency {
+    fn name(&self) -> &UnitName {
+        &self.name
     }
-    fn requirements(&self) -> &Vec<String> {
+    fn requirements(&self) -> &Vec<UnitName> {
         &self.requirements
     }
-    fn suggestions(&self) -> &Vec<String> {
+    fn suggestions(&self) -> &Vec<UnitName> {
         &self.suggestions
     }
-    fn provides(&self) -> &Vec<String> {
+    fn provides(&self) -> &Vec<UnitName> {
         &self.provides
     }
 }
@@ -208,7 +208,7 @@ impl ScenarioDescription {
             let tests = tests_rc.borrow();
             for (test_name, test) in tests.iter() {
                 if self.assumptions.contains(test_name) {
-                    let assumption_dep = AssumptionDependency::new(test_name.to_string());
+                    let assumption_dep = AssumptionDependency::new(test_name.clone());
                     graph.add_dependency(&assumption_dep);
                 } else {
                     graph.add_dependency(&*test.lock().unwrap());
@@ -218,16 +218,12 @@ impl ScenarioDescription {
 
         let mut test_names = vec![];
         for test_name in &self.tests {
-            test_names.push(test_name.to_string());
+            test_names.push(test_name.clone());
         }
 
-        let test_sequence_strings = graph.resolve_named_dependencies(&test_names)?;
+        let test_sequence = graph.resolve_named_dependencies(&test_names)?;
         let mut test_order = vec![];
-        for test_name_string in test_sequence_strings {
-            // Unwrap, because the name ought to be valid due to it being internally generated.
-            let test_name = UnitName::from_str(test_name_string.as_str(), "test")
-                .expect("Invalid test name generated");
-
+        for test_name in test_sequence {
             // Only add the test to the test order if it's not an assumption.
             if !self.assumptions.contains(&test_name) {
                 test_order.push(test_name);

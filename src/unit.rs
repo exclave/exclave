@@ -82,6 +82,7 @@ impl UnitName {
             "jig" => UnitKind::Jig,
             "scenario" => UnitKind::Scenario,
             "test" => UnitKind::Test,
+            "interface" => UnitKind::Interface,
             _ => return Err(UnitNameError::UnrecognizedUnitType(extension)),
         };
 
@@ -127,7 +128,7 @@ pub enum UnitIncompatibleReason {
     TestProgramFailed(String),
     TestFileNotPresent(String),
     IncompatibleJig,
-    DependencyError(DepError),
+    DependencyError(DepError<UnitName>),
 }
 
 impl fmt::Display for UnitIncompatibleReason {
@@ -187,8 +188,8 @@ impl From<RunnyError> for UnitIncompatibleReason {
     }
 }
 
-impl From<DepError> for UnitIncompatibleReason {
-    fn from(error: DepError) -> Self {
+impl From<DepError<UnitName>> for UnitIncompatibleReason {
+    fn from(error: DepError<UnitName>) -> Self {
         UnitIncompatibleReason::DependencyError(error)
     }
 }

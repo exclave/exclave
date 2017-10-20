@@ -24,15 +24,6 @@ impl UnitLoader {
         }
     }
 
-    fn handle_status(&self, event: &UnitStatusEvent) {
-        match event.status() {
-            &UnitStatus::Added(ref path) => self.load(event.name(), path),
-            &UnitStatus::Updated(ref path) => self.update(event.name(), path),
-            &UnitStatus::Removed(ref path) => self.unload(event.name(), path),
-            _ => (),
-        }
-    }
-
     pub fn process_message(&self, msg: &UnitEvent) {
         match msg {
             &UnitEvent::Shutdown => return,
@@ -44,75 +35,23 @@ impl UnitLoader {
         }
     }
 
+    fn handle_status(&self, event: &UnitStatusEvent) {
+        match event.status() {
+            &UnitStatus::Added(ref path) => self.load(event.name(), path),
+            &UnitStatus::Updated(ref path) => self.update(event.name(), path),
+            &UnitStatus::Removed(ref path) => self.unload(event.name(), path),
+            _ => (),
+        }
+    }
+
     pub fn load(&self, name: &UnitName, path: &PathBuf) {
-        self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_started(name)));
-        self.load_or_update(name, path);
+        self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_started(name, path)));
     }
 
     pub fn update(&self, name: &UnitName, path: &PathBuf) {
-        self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_update_started(name)));
-        self.load_or_update(name, path);
+        self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_update_started(name, path)));
     }
-
-    fn load_or_update(&self, name: &UnitName, path: &PathBuf) {
-
-        // For now, we only support testing Jig
-        match name.kind() {
-            &UnitKind::Jig => {
-                // Ensure the jig is valid, has valid syntax, and can be loaded
-                match JigDescription::from_path(path) {
-                    Err(e) =>
-                        self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_failed(name, format!("{}", e)))),
-                    Ok(description) => {
-                        self.library.lock().unwrap().update_jig_description(description)
-                    }
-                }
-            }
-
-            &UnitKind::Test => {
-                // Ensure the test is valid, has valid syntax, and can be loaded
-                match TestDescription::from_path(path) {
-                    Err(e) =>
-                        self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_failed(name, format!("{}", e)))),
-                    Ok(description) => {
-                        self.library.lock().unwrap().update_test_description(description)
-                    }
-                }
-            }
-
-            &UnitKind::Scenario => {
-                // Ensure the scenario is valid, has valid syntax, and can be loaded
-                match ScenarioDescription::from_path(path) {
-                    Err(e) =>
-                        self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_failed(name, format!("{}", e)))),
-                    Ok(description) => {
-                        self.library.lock().unwrap().update_scenario_description(description)
-                    }
-                }
-            }
-
-            &UnitKind::Interface => {
-                // Ensure the interface is valid, has valid syntax, and can be loaded
-                match InterfaceDescription::from_path(path) {
-                    Err(e) =>
-                        self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_failed(name, format!("{}", e)))),
-                    Ok(description) => {
-                        self.library.lock().unwrap().update_interface_description(description)
-                    }
-                }
-            }
-        }
-
-        // FIXME: Have this call quiesce.
-        self.library.lock().unwrap().rescan();
-    }
-
-    pub fn unload(&self, name: &UnitName, _: &PathBuf) {
-        match name.kind() {
-            &UnitKind::Interface => self.library.lock().unwrap().remove_interface(name),
-            &UnitKind::Jig => self.library.lock().unwrap().remove_jig(name),
-            &UnitKind::Scenario => self.library.lock().unwrap().remove_scenario(name),
-            &UnitKind::Test => self.library.lock().unwrap().remove_test(name),
-        }
+    pub fn unload(&self, name: &UnitName, path: &PathBuf) {
+        self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_unload_started(name, path)));
     }
 }

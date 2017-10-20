@@ -203,18 +203,18 @@ impl TestDescription {
 
 pub struct Test {
     id: UnitName,
-    name_as_string: String,
-    requirements_as_string: Vec<String>,
-    suggestions_as_string: Vec<String>,
-    provides_as_string: Vec<String>,
+    requirements: Vec<UnitName>,
+    suggestions: Vec<UnitName>,
+    provides: Vec<UnitName>,
 }
 
 impl Test {
     pub fn new(desc: &TestDescription) -> Test {
-        Test { id: desc.id.clone(), name_as_string: desc.id.to_string(),
-        requirements_as_string: desc.requires.iter().map(|r| r.to_string()).collect(),
-        suggestions_as_string: desc.suggests.iter().map(|r| r.to_string()).collect(),
-        provides_as_string: desc.provides.iter().map(|r| r.to_string()).collect(),
+        Test {
+            id: desc.id.clone(),
+            requirements: desc.requires.clone(),
+            suggestions: desc.suggests.clone(),
+            provides: desc.provides.clone(),
          }
     }
 
@@ -227,17 +227,17 @@ impl Test {
     }
 }
 
-impl Dependency for Test {
-    fn name(&self) -> &str {
-        &self.name_as_string.as_str()
+impl Dependency<UnitName> for Test {
+    fn name(&self) -> &UnitName {
+        &self.id
     }
-    fn requirements(&self) -> &Vec<String> {
-        &self.requirements_as_string
+    fn requirements(&self) -> &Vec<UnitName> {
+        &self.requirements
     }
-    fn suggestions(&self) -> &Vec<String> {
-        &self.suggestions_as_string
+    fn suggestions(&self) -> &Vec<UnitName> {
+        &self.suggestions
     }
-    fn provides(&self) -> &Vec<String> {
-        &self.provides_as_string
+    fn provides(&self) -> &Vec<UnitName> {
+        &self.provides
     }
 }

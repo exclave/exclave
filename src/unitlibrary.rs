@@ -15,6 +15,50 @@ use units::jig::{JigDescription};
 use units::scenario::{ScenarioDescription};
 use units::test::{TestDescription};
 
+macro_rules! process_if {
+    ($slf:ident, $name:ident, $tstkind:path, $path:ident, $trgt:ident, $drty:ident, $desc:ident) => {
+        if $name.kind() == &$tstkind {
+            match $trgt::from_path($path) {
+                Err(e) =>
+                    $slf.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_failed($name, format!("{}", e)))),
+                Ok(description) => {
+                    let id = description.id().clone();
+
+                    // Add the jig name to a list of "dirty jigs" that will be checked during "rescan()"
+                    $slf.$drty.borrow_mut().insert(id.clone(), ());
+
+                    // Add an entry to the status to determine whether this unit is new or not.
+                    $slf.$desc
+                        .borrow_mut()
+                        .insert(id.clone(), description);
+
+                    $slf.broadcaster
+                        .broadcast(&UnitEvent::Category(UnitCategoryEvent::new($tstkind,
+                                                                            &format!(
+                                "Number of units \
+                                loaded: {}",
+                                $slf.jig_descriptions.borrow().len()
+                            ))));
+                }
+            }
+        }
+    }
+}
+
+/*enum Unit {
+    Interface(Interface),
+    Jig(Jig),
+    Test(Test),
+    Scenario(Scenario),
+}*/
+
+enum UnitDescription {
+    InterfaceDescription(InterfaceDescription),
+    JigDescription(JigDescription),
+    TestDescription(TestDescription),
+    ScenarioDescription(ScenarioDescription),
+}
+
 pub struct UnitLibrary {
     broadcaster: UnitBroadcaster,
 
@@ -63,25 +107,14 @@ impl UnitLibrary {
         }
     }
 
-    pub fn update_interface_description(&mut self, description: InterfaceDescription) {
+    fn update_interface_description(&mut self, description: InterfaceDescription) {
         let id = description.id().clone();
 
         self.dirty_interfaces.borrow_mut().insert(id.clone(), ());
 
-        match self.interface_descriptions
+        self.interface_descriptions
             .borrow_mut()
-            .insert(id.clone(), description) {
-            None => {
-                self.unit_status
-                    .borrow_mut()
-                    .insert(id.clone(), UnitStatus::LoadStarted)
-            }
-            Some(_) => {
-                self.unit_status
-                    .borrow_mut()
-                    .insert(id.clone(), UnitStatus::UpdateStarted)
-            }
-        };
+            .insert(id.clone(), description);
 
         self.broadcaster
             .broadcast(&UnitEvent::Category(UnitCategoryEvent::new(UnitKind::Interface,
@@ -92,27 +125,16 @@ impl UnitLibrary {
                 ))));
     }
 
-    pub fn update_jig_description(&mut self, description: JigDescription) {
+    fn update_jig_description(&mut self, description: JigDescription) {
         let id = description.id().clone();
 
         // Add the jig name to a list of "dirty jigs" that will be checked during "rescan()"
         self.dirty_jigs.borrow_mut().insert(id.clone(), ());
 
         // Add an entry to the status to determine whether this unit is new or not.
-        match self.jig_descriptions
+        self.jig_descriptions
             .borrow_mut()
-            .insert(id.clone(), description) {
-            None => {
-                self.unit_status
-                    .borrow_mut()
-                    .insert(id.clone(), UnitStatus::LoadStarted)
-            }
-            Some(_) => {
-                self.unit_status
-                    .borrow_mut()
-                    .insert(id.clone(), UnitStatus::UpdateStarted)
-            }
-        };
+            .insert(id.clone(), description);
 
         self.broadcaster
             .broadcast(&UnitEvent::Category(UnitCategoryEvent::new(UnitKind::Jig,
@@ -128,20 +150,9 @@ impl UnitLibrary {
 
         self.dirty_scenarios.borrow_mut().insert(id.clone(), ());
 
-        match self.scenario_descriptions
+        self.scenario_descriptions
             .borrow_mut()
-            .insert(id.clone(), description) {
-            None => {
-                self.unit_status
-                    .borrow_mut()
-                    .insert(id.clone(), UnitStatus::LoadStarted)
-            }
-            Some(_) => {
-                self.unit_status
-                    .borrow_mut()
-                    .insert(id.clone(), UnitStatus::UpdateStarted)
-            }
-        };
+            .insert(id.clone(), description);
 
         self.broadcaster
             .broadcast(&UnitEvent::Category(UnitCategoryEvent::new(UnitKind::Scenario,
@@ -157,20 +168,9 @@ impl UnitLibrary {
 
         self.dirty_tests.borrow_mut().insert(id.clone(), ());
 
-        match self.test_descriptions
+        self.test_descriptions
             .borrow_mut()
-            .insert(id.clone(), description) {
-            None => {
-                self.unit_status
-                    .borrow_mut()
-                    .insert(id.clone(), UnitStatus::LoadStarted)
-            }
-            Some(_) => {
-                self.unit_status
-                    .borrow_mut()
-                    .insert(id.clone(), UnitStatus::UpdateStarted)
-            }
-        };
+            .insert(id.clone(), description);
 
         self.broadcaster
             .broadcast(&UnitEvent::Category(UnitCategoryEvent::new(UnitKind::Test,
@@ -179,42 +179,6 @@ impl UnitLibrary {
                      loaded: {}",
                     self.test_descriptions.borrow().len()
                 ))));
-    }
-
-    /// Mark an interface as removed.  Removal doesn't occur until rescan() is called.
-    pub fn remove_interface(&mut self, id: &UnitName) {
-        self.unit_status
-            .borrow_mut()
-            .insert(id.clone(), UnitStatus::UnloadStarted);
-        self.broadcaster
-            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_unloading(id)));
-    }
-
-    /// Mark a jig as removed.  Removal doesn't occur until rescan() is called.
-    pub fn remove_jig(&mut self, id: &UnitName) {
-        self.unit_status
-            .borrow_mut()
-            .insert(id.clone(), UnitStatus::UnloadStarted);
-        self.broadcaster
-            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_unloading(id)));
-    }
-
-    /// Mark a scenario as removed.  Removal doesn't occur until rescan() is called.
-    pub fn remove_scenario(&mut self, id: &UnitName) {
-        self.unit_status
-            .borrow_mut()
-            .insert(id.clone(), UnitStatus::UnloadStarted);
-        self.broadcaster
-            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_unloading(id)));
-    }
-
-    /// Mark a test as removed.  Removal doesn't occur until rescan() is called.
-    pub fn remove_test(&mut self, id: &UnitName) {
-        self.unit_status
-            .borrow_mut()
-            .insert(id.clone(), UnitStatus::UnloadStarted);
-        self.broadcaster
-            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_unloading(id)));
     }
 
     /// Examine all of the loaded units and ensure they can be loaded.
@@ -277,28 +241,28 @@ impl UnitLibrary {
 
         // 3. Delete any "dirty" objects that were Deleted.
         for (id, _) in self.dirty_jigs.borrow().iter() {
-            if statuses.get(id).unwrap() == &UnitStatus::UnloadStarted {
+            if let &UnitStatus::UnloadStarted(_) = statuses.get(id).unwrap() {
                 self.jig_descriptions.borrow_mut().remove(id);
                 self.unit_manager.borrow_mut().remove_jig(id);
                 statuses.remove(id);
             }
         }
         for (id, _) in self.dirty_tests.borrow().iter() {
-            if statuses.get(id).unwrap() == &UnitStatus::UnloadStarted {
+            if let &UnitStatus::UnloadStarted(_) = statuses.get(id).unwrap() {
                 self.test_descriptions.borrow_mut().remove(id);
                 self.unit_manager.borrow_mut().remove_test(id);
                 statuses.remove(id);
             }
         }
         for (id, _) in self.dirty_scenarios.borrow().iter() {
-            if statuses.get(id).unwrap() == &UnitStatus::UnloadStarted {
+            if let &UnitStatus::UnloadStarted(_) = statuses.get(id).unwrap() {
                 self.scenario_descriptions.borrow_mut().remove(id);
                 self.unit_manager.borrow_mut().remove_scenario(id);
                 statuses.remove(id);
             }
         }
         for (id, _) in self.dirty_interfaces.borrow().iter() {
-            if statuses.get(id).unwrap() == &UnitStatus::UnloadStarted {
+            if let &UnitStatus::UnloadStarted(_) = statuses.get(id).unwrap() {
                 self.interface_descriptions.borrow_mut().remove(id);
                 self.unit_manager.borrow_mut().remove_interface(id);
                 statuses.remove(id);
@@ -308,10 +272,10 @@ impl UnitLibrary {
         // 4. Load all Jigs that are valid.
         for (id, _) in self.dirty_jigs.borrow().iter() {
             match statuses.get(id).unwrap() {
-                &UnitStatus::LoadStarted => {
+                &UnitStatus::LoadStarted(_) => {
                     self.unit_manager.borrow_mut().load_jig(self.jig_descriptions.borrow().get(id).unwrap())
                 }
-                &UnitStatus::UpdateStarted => {
+                &UnitStatus::UpdateStarted(_) => {
                     self.unit_manager.borrow_mut().load_jig(self.jig_descriptions.borrow().get(id).unwrap())
                 }
                 x => panic!("Unexpected jig unit status: {}", x),
@@ -323,10 +287,10 @@ impl UnitLibrary {
         for (id, _) in self.dirty_interfaces.borrow().iter() {
         
             match statuses.get(id).unwrap() {
-                &UnitStatus::LoadStarted => {
+                &UnitStatus::LoadStarted(_) => {
                     self.unit_manager.borrow_mut().load_interface(self.interface_descriptions.borrow().get(id).unwrap())
                 }
-                &UnitStatus::UpdateStarted => {
+                &UnitStatus::UpdateStarted(_) => {
                     self.unit_manager.borrow_mut().load_interface(self.interface_descriptions.borrow().get(id).unwrap())
                 }
                 x => panic!("Unexpected interface unit status: {}", x),
@@ -337,10 +301,10 @@ impl UnitLibrary {
         // 6. Load all Tests that are compatible with this Jig.
         for (id, _) in self.dirty_tests.borrow().iter() {
             match statuses.get(id).unwrap() {
-                &UnitStatus::LoadStarted => {
+                &UnitStatus::LoadStarted(_) => {
                     self.unit_manager.borrow_mut().load_test(self.test_descriptions.borrow().get(id).unwrap())
                 }
-                &UnitStatus::UpdateStarted => {
+                &UnitStatus::UpdateStarted(_) => {
                     self.unit_manager.borrow_mut().load_test(self.test_descriptions.borrow().get(id).unwrap())
                 }
                 x => panic!("Unexpected test unit status: {}", x),
@@ -351,10 +315,10 @@ impl UnitLibrary {
         // 7. Load all Scenarios that are compatible with this Jig.
         for (id, _) in self.dirty_scenarios.borrow().iter() {
             match statuses.get(id).unwrap() {
-                &UnitStatus::LoadStarted => {
+                &UnitStatus::LoadStarted(_) => {
                     self.unit_manager.borrow_mut().load_scenario(self.scenario_descriptions.borrow().get(id).unwrap())
                 }
-                &UnitStatus::UpdateStarted => {
+                &UnitStatus::UpdateStarted(_) => {
                     self.unit_manager.borrow_mut().load_scenario(self.scenario_descriptions.borrow().get(id).unwrap())
                 }
                 x => panic!("Unexpected scenario unit status: {}", x),
@@ -365,7 +329,29 @@ impl UnitLibrary {
         self.broadcaster.broadcast(&UnitEvent::RescanFinish);
     }
 
-    pub fn process_message(&self, msg: &UnitEvent) {
-        self.unit_manager.borrow().process_message(msg);
+    pub fn process_message(&mut self, evt: &UnitEvent) {
+        if let &UnitEvent::Status(ref msg) = evt {
+            let &UnitStatusEvent {name: ref name, status: ref status} = msg;
+
+            match status {
+                &UnitStatus::LoadStarted(ref path) => {
+                    process_if!(self, name, UnitKind::Jig, path, JigDescription, dirty_jigs, jig_descriptions);
+                    process_if!(self, name, UnitKind::Interface, path, InterfaceDescription, dirty_interfaces, interface_descriptions);
+                    process_if!(self, name, UnitKind::Test, path, TestDescription, dirty_tests, test_descriptions);
+                    process_if!(self, name, UnitKind::Scenario, path, ScenarioDescription, dirty_scenarios, scenario_descriptions);
+                }
+                &UnitStatus::UpdateStarted(_) => (),
+                &UnitStatus::UnloadStarted(ref path) => {self.unit_status
+                .borrow_mut()
+                .insert(name.clone(), UnitStatus::UnloadStarted(path.clone())); ()},
+                _ => (),
+            }
+
+            // FIXME: Have this call quiesce.
+            self.rescan();
+        }
+
+        // Also pass the message on to the unit manager.
+        self.unit_manager.borrow().process_message(evt);
     }
 }
