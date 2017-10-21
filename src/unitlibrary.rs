@@ -18,6 +18,8 @@ use units::test::{TestDescription};
 macro_rules! process_if {
     ($slf:ident, $name:ident, $tstkind:path, $path:ident, $trgt:ident, $drty:ident, $desc:ident) => {
         if $name.kind() == &$tstkind {
+                    $slf.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected($name)));
+            $slf.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_started($name, $path)));
             match $trgt::from_path($path) {
                 Err(e) =>
                     $slf.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_failed($name, format!("{}", e)))),
@@ -30,7 +32,7 @@ macro_rules! process_if {
                     // Add an entry to the status to determine whether this unit is new or not.
                     $slf.$desc
                         .borrow_mut()
-                        .insert(id.clone(), description);
+                        .insert(id, description);
 
                     $slf.broadcaster
                         .broadcast(&UnitEvent::Category(UnitCategoryEvent::new($tstkind,
@@ -44,13 +46,6 @@ macro_rules! process_if {
         }
     }
 }
-
-/*enum Unit {
-    Interface(Interface),
-    Jig(Jig),
-    Test(Test),
-    Scenario(Scenario),
-}*/
 
 enum UnitDescription {
     InterfaceDescription(InterfaceDescription),
@@ -105,80 +100,6 @@ impl UnitLibrary {
 
             unit_manager: RefCell::new(UnitManager::new(broadcaster, config)),
         }
-    }
-
-    fn update_interface_description(&mut self, description: InterfaceDescription) {
-        let id = description.id().clone();
-
-        self.dirty_interfaces.borrow_mut().insert(id.clone(), ());
-
-        self.interface_descriptions
-            .borrow_mut()
-            .insert(id.clone(), description);
-
-        self.broadcaster
-            .broadcast(&UnitEvent::Category(UnitCategoryEvent::new(UnitKind::Interface,
-                                                                   &format!(
-                    "Number of interfaces \
-                     loaded: {}",
-                    self.interface_descriptions.borrow().len()
-                ))));
-    }
-
-    fn update_jig_description(&mut self, description: JigDescription) {
-        let id = description.id().clone();
-
-        // Add the jig name to a list of "dirty jigs" that will be checked during "rescan()"
-        self.dirty_jigs.borrow_mut().insert(id.clone(), ());
-
-        // Add an entry to the status to determine whether this unit is new or not.
-        self.jig_descriptions
-            .borrow_mut()
-            .insert(id.clone(), description);
-
-        self.broadcaster
-            .broadcast(&UnitEvent::Category(UnitCategoryEvent::new(UnitKind::Jig,
-                                                                   &format!(
-                    "Number of units \
-                     loaded: {}",
-                    self.jig_descriptions.borrow().len()
-                ))));
-    }
-
-    pub fn update_scenario_description(&mut self, description: ScenarioDescription) {
-        let id = description.id().clone();
-
-        self.dirty_scenarios.borrow_mut().insert(id.clone(), ());
-
-        self.scenario_descriptions
-            .borrow_mut()
-            .insert(id.clone(), description);
-
-        self.broadcaster
-            .broadcast(&UnitEvent::Category(UnitCategoryEvent::new(UnitKind::Scenario,
-                                                                   &format!(
-                    "Number of scenarios \
-                     loaded: {}",
-                    self.scenario_descriptions.borrow().len()
-                ))));
-    }
-
-    pub fn update_test_description(&mut self, description: TestDescription) {
-        let id = description.id().clone();
-
-        self.dirty_tests.borrow_mut().insert(id.clone(), ());
-
-        self.test_descriptions
-            .borrow_mut()
-            .insert(id.clone(), description);
-
-        self.broadcaster
-            .broadcast(&UnitEvent::Category(UnitCategoryEvent::new(UnitKind::Test,
-                                                                   &format!(
-                    "Number of tests \
-                     loaded: {}",
-                    self.test_descriptions.borrow().len()
-                ))));
     }
 
     /// Examine all of the loaded units and ensure they can be loaded.
@@ -331,7 +252,7 @@ impl UnitLibrary {
 
     pub fn process_message(&mut self, evt: &UnitEvent) {
         if let &UnitEvent::Status(ref msg) = evt {
-            let &UnitStatusEvent {name: ref name, status: ref status} = msg;
+            let &UnitStatusEvent {ref name, ref status} = msg;
 
             match status {
                 &UnitStatus::LoadStarted(ref path) => {

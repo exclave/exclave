@@ -7,7 +7,7 @@ use std::thread;
 
 use config::Config;
 use unit::{UnitName, UnitKind};
-use unitbroadcaster::{UnitBroadcaster, UnitCategoryEvent, UnitEvent, UnitStatus, UnitStatusEvent};
+use unitbroadcaster::{UnitBroadcaster, UnitEvent, UnitStatusEvent};
 use units::interface::{Interface, InterfaceDescription};
 use units::jig::{Jig, JigDescription};
 use units::scenario::{Scenario, ScenarioDescription};

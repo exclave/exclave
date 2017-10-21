@@ -1,26 +1,18 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use unit::{UnitName, UnitKind};
+use unit::UnitName;
 use unitbroadcaster::{UnitBroadcaster, UnitEvent, UnitStatus, UnitStatusEvent};
-use units::interface::InterfaceDescription;
-use units::jig::JigDescription;
-use units::scenario::ScenarioDescription;
-use units::test::TestDescription;
-use unitlibrary::UnitLibrary;
 
 pub struct UnitLoader {
     broadcaster: UnitBroadcaster,
-    library: Arc<Mutex<UnitLibrary>>,
 }
 
 impl UnitLoader {
-    pub fn new(broadcaster: &UnitBroadcaster,
-               library: &Arc<Mutex<UnitLibrary>>)
+    pub fn new(broadcaster: &UnitBroadcaster)
                -> Self {
         UnitLoader {
             broadcaster: broadcaster.clone(),
-            library: library.clone(),
         }
     }
 

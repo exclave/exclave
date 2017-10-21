@@ -24,8 +24,10 @@ fn main() {
     let config = Arc::new(Mutex::new(config::Config::new()));
 
     let unit_broadcaster = UnitBroadcaster::new();
-    let unit_library = Arc::new(Mutex::new(UnitLibrary::new(&unit_broadcaster, &config)));
-    let unit_loader = UnitLoader::new(&unit_broadcaster, &unit_library);
+    let message_receiver = unit_broadcaster.subscribe();
+    let mut unit_library = UnitLibrary::new(&unit_broadcaster, &config);
+    let unit_loader = UnitLoader::new(&unit_broadcaster);
+    let mut unit_watcher = UnitWatcher::new(&unit_broadcaster);
 
     // The signal handler must come first, so that the same mask gets
     // applied to all threads.
@@ -67,18 +69,24 @@ fn main() {
         None
     };
 
-    let mut unit_watcher = UnitWatcher::new(&unit_broadcaster);
-
     terminal::TerminalInterface::start(output_type, unit_broadcaster.subscribe());
 
     for config_dir in config_dirs {
         unit_watcher.add_path(config_dir).expect("Unable to add config directory");
     }
 
+    use std::fs::File;
+    use std::path::Path;
+    use std::io::Write;
+    let fname = "log.txt";
+    let path = Path::new(fname);
+    let mut file = File::create(&path).expect("Couldn't create logfile");
     // Main message loop.  Monitor messages and pass them to each component.
-    let message_receiver = unit_broadcaster.subscribe();
+    let mut i = 1;
     while let Ok(msg) = message_receiver.recv() {
+        writeln!(file, "Got message {}: {:?}", i, msg);
+        i = i + 1;
         unit_loader.process_message(&msg);
-        unit_library.lock().unwrap().process_message(&msg);
+        unit_library.process_message(&msg);
     }
 }
