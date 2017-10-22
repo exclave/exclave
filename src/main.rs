@@ -84,7 +84,7 @@ fn main() {
     // Main message loop.  Monitor messages and pass them to each component.
     let mut i = 1;
     while let Ok(msg) = message_receiver.recv() {
-        writeln!(file, "Got message {}: {:?}", i, msg);
+        writeln!(file, "Got message {}: {:?}", i, msg).expect("Couldn't write message to logfile");
         i = i + 1;
         unit_loader.process_message(&msg);
         unit_library.process_message(&msg);

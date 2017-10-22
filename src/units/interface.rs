@@ -241,9 +241,9 @@ impl Interface {
         let result = match msg {
             ManagerStatusMessage::Jig(j) => writeln!(process, "JIG {}", j.to_string()),
             ManagerStatusMessage::Scenarios(list) => {
-                write!(process, "SCENARIOS");
+                write!(process, "SCENARIOS").expect("Couldn't write SCENARIOS verb to output");
                 for test_name in list {
-                    write!(process, " {}", test_name);
+                    write!(process, " {}", test_name).expect("Couldn't write test name to output");
                 }
                 writeln!(process, "")
             }

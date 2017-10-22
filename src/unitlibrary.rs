@@ -3,7 +3,6 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::mpsc::{Receiver};
 use std::sync::{Arc, Mutex};
 
 use config::Config;
