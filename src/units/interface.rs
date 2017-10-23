@@ -4,7 +4,7 @@ extern crate systemd_parser;
 use std::cell::RefCell;
 use std::fs::File;
 use std::io::{Read, Write, BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 
@@ -42,6 +42,9 @@ pub struct InterfaceDescription {
 
     /// The format expected by the interface
     format: InterfaceFormat,
+
+    /// The working directory to start from when running the interface
+    working_directory: Option<PathBuf>,
 }
 
 impl InterfaceDescription {
@@ -64,6 +67,7 @@ impl InterfaceDescription {
             jigs: vec![],
             format: InterfaceFormat::Text,
             exec_start: "".to_owned(),
+            working_directory: None,
         };
 
         for entry in unit_file.lookup_by_category("Interface") {
@@ -81,6 +85,10 @@ impl InterfaceDescription {
                             Some(s) => UnitName::from_list(s, "jig")?,
                             None => vec![],
                         }
+                    }
+                    "WorkingDirectory" => {
+                        interface_description.working_directory =
+                            Some(Path::new(directive.value().unwrap_or("")).to_owned())
                     }
                     "ExecStart" => {
                         interface_description.exec_start = match directive.value() {
@@ -158,6 +166,7 @@ impl InterfaceDescription {
 pub struct Interface {
     id: UnitName,
     exec_start: String,
+    working_directory: Option<PathBuf>,
     format: InterfaceFormat,
     process: RefCell<Option<Running>>,
 }
@@ -167,6 +176,7 @@ impl Interface {
         Interface {
             id: desc.id.clone(),
             exec_start: desc.exec_start.clone(),
+            working_directory: desc.working_directory.clone(),
             format: desc.format,
             process: RefCell::new(None),
         }
@@ -180,14 +190,19 @@ impl Interface {
         &self,
         manager: &UnitManager,
         config: &Config,
-    ) -> Result<Receiver<ManagerControlMessage>, UnitActivateError> {
-        let (sender, receiver) = channel();
-
+    ) -> Result<(), UnitActivateError> {
+        let wd = if let Some(ref d) = self.working_directory {
+            Some(d.clone())
+        }
+        else {
+            Some(config.working_directory().clone())
+        };
         let mut running = Runny::new(self.exec_start.as_str())
-            .directory(&Some(config.working_directory().clone()))
+            .directory(&wd)
             .start()?;
 
         let stdout = running.take_output();
+        let stderr = running.take_error();
 
         let control_sender = manager.get_control_channel();
         let control_sender_id = self.id().clone();
@@ -199,7 +214,10 @@ impl Interface {
 
                 // Pass control to an out-of-object thread, and shuttle communications
                 // from stdout onto the control_sender channel.
-                thread::spawn(move || Self::text_read(control_sender_id, control_sender, stdout));
+                let thr_sender_id = control_sender_id.clone();
+                let thr_sender = control_sender.clone();
+                thread::spawn(move || Self::text_read(thr_sender_id, thr_sender, stdout));
+                thread::spawn(move || Self::text_read(control_sender_id, control_sender, stderr));
             }
             InterfaceFormat::JSON => {
                 ();
@@ -208,7 +226,7 @@ impl Interface {
 
         *self.process.borrow_mut() = Some(running);
 
-        Ok(receiver)
+        Ok(())
     }
 
     pub fn deactivate(&self) -> Result<(), UnitDeactivateError> {
@@ -304,7 +322,7 @@ impl Interface {
         for line in BufReader::new(stdout).lines() {
             let line = line.expect("Unable to get next line");
             let mut words: Vec<String> =
-                line.split_whitespace().map(|x| Self::cfti_unescape(x.to_string())).collect();
+                line.split_whitespace().map(|x| Self::cfti_unescape(x.to_owned())).collect();
 
             // Don't crash if we get a blank line.
             if words.len() == 0 {
@@ -345,7 +363,7 @@ impl Interface {
                 }
                 "log" => ControlMessageContents::Log(words.join(" ")),
                 */
-                v => ManagerControlMessageContents::Unimplemented(format!("Unimplemented verb: {}", v)),
+                v => ManagerControlMessageContents::Unimplemented(v.to_owned(), words.join(" ")),
             };
 
             // If the send fails, that means the other end has closed the pipe.

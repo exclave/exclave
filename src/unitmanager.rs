@@ -29,7 +29,7 @@ pub enum ManagerControlMessageContents {
     Scenarios,
 
     /// Client sent an unimplemented message.
-    Unimplemented(String),
+    Unimplemented(String /* verb */, String /* rest of line */),
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
@@ -271,7 +271,7 @@ impl UnitManager {
 
         let response = match *msg {
             ManagerControlMessageContents::Scenarios => ManagerStatusMessage::Scenarios(self.scenarios.borrow().keys().map(|x| x.clone()).collect()),
-            ManagerControlMessageContents::Unimplemented(_) => return,
+            ManagerControlMessageContents::Unimplemented(ref verb, ref remainder) => { eprintln!("Unimplemented verb: {} {}", verb, remainder); return; },
         };
 
         match *sender_name.kind() {

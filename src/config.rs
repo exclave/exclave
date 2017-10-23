@@ -1,28 +1,25 @@
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 5;
 
-macro_rules! vec_of_strings {
-    ($($x:expr),*) => (vec![$($x.to_string()),*]);
-}
-
 pub struct Config {
     timeout: Duration,
-    working_directory: String,
-    paths: Vec<String>,
+    working_directory: PathBuf,
+    paths: Vec<PathBuf>,
 }
 
 impl Config {
     pub fn new() -> Config {
         Config {
             timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
-            working_directory: ".".to_owned(),
-            paths: vec_of_strings![
-                "/usr/local/sbin",
-                "/usr/local/bin",
-                "/usr/sbin",
-                "/usr/bin",
-                "/sbin:/bin"
+            working_directory: Path::new(".").to_owned(),
+            paths: vec![
+                Path::new("/usr/local/sbin").to_owned(),
+                Path::new("/usr/local/bin").to_owned(),
+                Path::new("/usr/sbin").to_owned(),
+                Path::new("/usr/bin").to_owned(),
+                Path::new("/sbin:/bin").to_owned()
             ],
         }
     }
@@ -31,10 +28,10 @@ impl Config {
         &self.timeout
     }
 
-    pub fn working_directory(&self) -> &String {
+    pub fn working_directory(&self) -> &PathBuf {
         &self.working_directory
     }
-    pub fn paths(&self) -> &Vec<String> {
+    pub fn paths(&self) -> &Vec<PathBuf> {
         &self.paths
     }
 }
