@@ -144,28 +144,26 @@ impl fmt::Display for UnitIncompatibleReason {
                 write!(f, "Test file {} not present", file_name)
             }
             &UnitIncompatibleReason::IncompatibleJig => write!(f, "Jig not compatible"),
-            &UnitIncompatibleReason::DependencyError(ref dep_error) => {
-                match dep_error {
-                    &DepError::RequirementsNotFound(ref req) => {
-                        write!(f, "Requirement '{}' not found", req)
-                    }
-                    &DepError::RequirementNotFound(ref req1, ref req2) => {
-                        write!(f, "Requirement {} not found for {}", req1, req2)
-                    }
-                    &DepError::SuggestionsNotFound(ref req) => {
-                        write!(f, "Suggestion '{}' not found", req)
-                    }
-                    &DepError::SuggestionNotFound(ref req1, ref req2) => {
-                        write!(f, "Suggestion {} not found for {}", req1, req2)
-                    }
-                    &DepError::DependencyNotFound(ref name) => {
-                        write!(f, "Dependency '{}' not found", name)
-                    }
-                    &DepError::CircularDependency(ref req1, ref req2) => {
-                        write!(f, "{} and {} have a circular dependency", req1, req2)
-                    }
+            &UnitIncompatibleReason::DependencyError(ref dep_error) => match dep_error {
+                &DepError::RequirementsNotFound(ref req) => {
+                    write!(f, "Requirement '{}' not found", req)
                 }
-            }
+                &DepError::RequirementNotFound(ref req1, ref req2) => {
+                    write!(f, "Requirement {} not found for {}", req1, req2)
+                }
+                &DepError::SuggestionsNotFound(ref req) => {
+                    write!(f, "Suggestion '{}' not found", req)
+                }
+                &DepError::SuggestionNotFound(ref req1, ref req2) => {
+                    write!(f, "Suggestion {} not found for {}", req1, req2)
+                }
+                &DepError::DependencyNotFound(ref name) => {
+                    write!(f, "Dependency '{}' not found", name)
+                }
+                &DepError::CircularDependency(ref req1, ref req2) => {
+                    write!(f, "{} and {} have a circular dependency", req1, req2)
+                }
+            },
         }
     }
 }
@@ -176,10 +174,9 @@ impl From<RunnyError> for UnitIncompatibleReason {
             RunnyError::NoCommandSpecified => {
                 UnitIncompatibleReason::TestProgramFailed("No command specified".to_owned())
             }
-            RunnyError::RunnyIoError(ref e) => {
-                UnitIncompatibleReason::TestProgramFailed(format!("Error running test program: {}",
-                                                                  e))
-            }
+            RunnyError::RunnyIoError(ref e) => UnitIncompatibleReason::TestProgramFailed(
+                format!("Error running test program: {}", e),
+            ),
             #[cfg(unix)]
             RunnyError::NixError(ref e) => {
                 UnitIncompatibleReason::TestProgramFailed(format!("Unix error {}", e))
@@ -195,7 +192,7 @@ impl From<DepError<UnitName>> for UnitIncompatibleReason {
 }
 
 pub enum UnitActivateError {
-    ExecFailed(RunnyError)
+    ExecFailed(RunnyError),
 }
 
 impl From<RunnyError> for UnitActivateError {
@@ -206,7 +203,22 @@ impl From<RunnyError> for UnitActivateError {
 
 impl fmt::Display for UnitActivateError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Unable to activate unit")
+        use self::runny::RunnyError;
+        use std::error::Error;
+        match self {
+            &UnitActivateError::ExecFailed(ref re) => match re {
+                &RunnyError::RunnyIoError(ref e) => {
+                    write!(f, "Unable to activate unit: {}", e.description())
+                }
+                &RunnyError::NoCommandSpecified => {
+                    write!(f, "Unable to activate unit: No command specified")
+                }
+                #[cfg(unix)]
+                &RunnyError::NixError(ref e) => {
+                    write!(f, "Unable to activate unit: Nix library error: {:?}", e)
+                }
+            },
+        }
     }
 }
 
@@ -225,10 +237,12 @@ pub enum UnitDescriptionError {
     FileOpenError(io::Error),
     ParseError(ParserError),
     RegexError(self::regex::Error),
-    InvalidValue(String, // Section name
-                 String, // Key name
-                 String, // Specified value
-                 Vec<String> /* Allowed values */),
+    InvalidValue(
+        String,      // Section name
+        String,      // Key name
+        String,      // Specified value
+        Vec<String>, /* Allowed values */
+    ),
 }
 
 impl From<UnitNameError> for UnitDescriptionError {
@@ -272,15 +286,17 @@ impl fmt::Display for UnitDescriptionError {
                 write!(f, "syntax error: {}", e.description())
             }
             &UnitDescriptionError::RegexError(ref e) => write!(f, "unable to parse regex: {}", e),
-            &UnitDescriptionError::MissingValue(ref sec, ref key) => write!(f, "key '{}' in section '{}' requires a value", key, sec),
-            &UnitDescriptionError::InvalidValue(ref sec, ref key, ref val, ref allowed) => {
-                write!(f,
-                       "key {} in section {} has invalid value: {}, must be one of: {}",
-                       key,
-                       sec,
-                       val,
-                       allowed.join(","))
+            &UnitDescriptionError::MissingValue(ref sec, ref key) => {
+                write!(f, "key '{}' in section '{}' requires a value", key, sec)
             }
+            &UnitDescriptionError::InvalidValue(ref sec, ref key, ref val, ref allowed) => write!(
+                f,
+                "key {} in section {} has invalid value: {}, must be one of: {}",
+                key,
+                sec,
+                val,
+                allowed.join(",")
+            ),
         }
     }
 }

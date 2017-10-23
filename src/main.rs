@@ -77,7 +77,7 @@ fn main() {
         unit_watcher.add_path(config_dir).expect("Unable to add config directory");
     }
 
-    let mut quiesce = quiesce::Quiesce::new(Duration::from_secs(3), &unit_broadcaster);
+    let mut quiesce = quiesce::Quiesce::new(Duration::from_secs(1), &unit_broadcaster);
 
     use std::fs::File;
     use std::path::Path;

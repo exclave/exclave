@@ -54,8 +54,8 @@ pub enum UnitStatus {
 impl fmt::Display for UnitStatus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            &UnitStatus::Added(ref path) => write!(f, "Added {}", path.to_string_lossy()),
-            &UnitStatus::Updated(ref path) => write!(f, "Updated {}", path.to_string_lossy()),
+            &UnitStatus::Added(ref path) => write!(f, "Added file {}", path.to_string_lossy()),
+            &UnitStatus::Updated(ref path) => write!(f, "Updated file {}", path.to_string_lossy()),
             &UnitStatus::LoadStarted(ref path) => write!(f, "Load started {}", path.to_string_lossy()),
             &UnitStatus::LoadFailed(ref x) => write!(f, "Load failed: {}", x),
             &UnitStatus::Incompatible(ref x) => write!(f, "Incompatible: {}", x),
@@ -71,7 +71,7 @@ impl fmt::Display for UnitStatus {
             }
             &UnitStatus::UnloadStarted(ref path) => write!(f, "Unloading {}", path.to_string_lossy()),
             &UnitStatus::UpdateStarted(ref path) => write!(f, "Updating {}", path.to_string_lossy()),
-            &UnitStatus::Removed(ref path) => write!(f, "Removed {}", path.to_string_lossy()),
+            &UnitStatus::Removed(ref path) => write!(f, "Removed file {}", path.to_string_lossy()),
         }
     }
 }

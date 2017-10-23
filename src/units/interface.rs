@@ -355,3 +355,9 @@ impl Interface {
         }
     }
 }
+
+impl Drop for Interface {
+    fn drop(&mut self) {
+       eprintln!("Dropping interface {}", self.id);
+    }
+}

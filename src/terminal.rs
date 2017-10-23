@@ -104,7 +104,10 @@ impl TerminalInterface {
         };
     }
 
-    fn redraw_screen(&mut self, _: UnitEvent) {
+    fn redraw_screen(&mut self, evt: UnitEvent) {
+        if evt != UnitEvent::RescanFinish {
+            return;
+        }
 
         // Clear out the previous entries, plus the headers for the field types.
         self.terminal.clear_last_lines(self.last_line_count).expect("Unable to clear lines");
