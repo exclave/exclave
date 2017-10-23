@@ -43,7 +43,6 @@ impl UnitWatcher {
                         // Send a copy of the message to each of the listeners.
                         if let Some(evt) = status_event {
                             thread_broadcaster.broadcast(&UnitEvent::Status(evt));
-                            let debounce_broadcaster = thread_broadcaster.clone();
                         }
                     }
                     Err(e) => eprintln!("watch error: {:?}", e),

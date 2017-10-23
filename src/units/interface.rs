@@ -3,18 +3,19 @@ extern crate systemd_parser;
 
 use std::cell::RefCell;
 use std::fs::File;
-use std::io::{Read, Write, BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::Sender;
 use std::thread;
 
 use config::Config;
 use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason,
            UnitName};
-use unitmanager::{UnitManager, ManagerStatusMessage, ManagerControlMessage, ManagerControlMessageContents};
+use unitmanager::{ManagerControlMessage, ManagerControlMessageContents, ManagerStatusMessage,
+                  UnitManager};
 
 use self::systemd_parser::items::DirectiveEntry;
-use self::runny::{Runny};
+use self::runny::Runny;
 use self::runny::running::{Running, RunningOutput};
 
 #[derive(Clone, Copy)]
@@ -172,7 +173,7 @@ pub struct Interface {
 }
 
 impl Interface {
-    pub fn new(desc: &InterfaceDescription, manager: &UnitManager, config: &Config) -> Interface {
+    pub fn new(desc: &InterfaceDescription, _: &UnitManager, _: &Config) -> Interface {
         Interface {
             id: desc.id.clone(),
             exec_start: desc.exec_start.clone(),
@@ -193,13 +194,10 @@ impl Interface {
     ) -> Result<(), UnitActivateError> {
         let wd = if let Some(ref d) = self.working_directory {
             Some(d.clone())
-        }
-        else {
+        } else {
             Some(config.working_directory().clone())
         };
-        let mut running = Runny::new(self.exec_start.as_str())
-            .directory(&wd)
-            .start()?;
+        let mut running = Runny::new(self.exec_start.as_str()).directory(&wd).start()?;
 
         let stdout = running.take_output();
         let stderr = running.take_error();
@@ -208,7 +206,6 @@ impl Interface {
         let control_sender_id = self.id().clone();
         match self.format {
             InterfaceFormat::Text => {
-
                 // Send some initial information to the client.
                 writeln!(running, "HELLO Jig/20 1.0").unwrap();
 
@@ -217,7 +214,9 @@ impl Interface {
                 let thr_sender_id = control_sender_id.clone();
                 let thr_sender = control_sender.clone();
                 thread::spawn(move || Self::text_read(thr_sender_id, thr_sender, stdout));
-                thread::spawn(move || Self::text_read(control_sender_id, control_sender, stderr));
+                thread::spawn(move || {
+                    Self::text_read(control_sender_id, control_sender, stderr)
+                });
             }
             InterfaceFormat::JSON => {
                 ();
@@ -241,13 +240,12 @@ impl Interface {
         }
     }
 
-    fn json_write(&self, msg: ManagerStatusMessage) -> Result<(), String> {
+    fn json_write(&self, _: ManagerStatusMessage) -> Result<(), String> {
         unimplemented!();
     }
 
     /// Write a UnitInterfaceMessage to a Text-formatted output.
-    fn text_write(&self, msg: ManagerStatusMessage) -> Result<(), String>
-    {
+    fn text_write(&self, msg: ManagerStatusMessage) -> Result<(), String> {
         let mut process_opt = self.process.borrow_mut();
 
         if process_opt.is_none() {
@@ -264,8 +262,7 @@ impl Interface {
                     write!(process, " {}", test_name).expect("Couldn't write test name to output");
                 }
                 writeln!(process, "")
-            }
-            /*
+            } /*
             BroadcastMessageContents::Log(l) => writeln!(
                 stdin,
                 "LOG {}\t{}\t{}\t{}\t{}\t{}",
@@ -315,14 +312,18 @@ impl Interface {
     }
 
     fn cfti_unescape(msg: String) -> String {
-        msg.replace("\\t", "\t").replace("\\n", "\n").replace("\\r", "\r").replace("\\\\", "\\")
+        msg.replace("\\t", "\t")
+            .replace("\\n", "\n")
+            .replace("\\r", "\r")
+            .replace("\\\\", "\\")
     }
 
     fn text_read(id: UnitName, control: Sender<ManagerControlMessage>, stdout: RunningOutput) {
         for line in BufReader::new(stdout).lines() {
             let line = line.expect("Unable to get next line");
-            let mut words: Vec<String> =
-                line.split_whitespace().map(|x| Self::cfti_unescape(x.to_owned())).collect();
+            let mut words: Vec<String> = line.split_whitespace()
+                .map(|x| Self::cfti_unescape(x.to_owned()))
+                .collect();
 
             // Don't crash if we get a blank line.
             if words.len() == 0 {
@@ -376,6 +377,6 @@ impl Interface {
 
 impl Drop for Interface {
     fn drop(&mut self) {
-       eprintln!("Dropping interface {}", self.id);
+        eprintln!("Dropping interface {}", self.id);
     }
 }

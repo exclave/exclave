@@ -116,7 +116,7 @@ impl UnitManager {
         }
 
         // "Select" the Interface, which means we can activate it later on.
-        let mut new_interface = match description.select(self, &*self.cfg.lock().unwrap()) {
+        let new_interface = match description.select(self, &*self.cfg.lock().unwrap()) {
             Ok(o) => o,
             Err(e) => {
                 self.bc.broadcast(
@@ -133,7 +133,7 @@ impl UnitManager {
         self.bc
             .broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected(description.id())));
 
-        let interface_rx = match new_interface.activate(self, &*self.cfg.lock().unwrap()) {
+        match new_interface.activate(self, &*self.cfg.lock().unwrap()) {
             Err(e) => {
             self.bc
             .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active_failed(description.id(), format!("{}", e))));
