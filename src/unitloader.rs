@@ -20,6 +20,7 @@ impl UnitLoader {
         match msg {
             &UnitEvent::Shutdown => return,
             &UnitEvent::Status(ref evt) => self.handle_status(evt),
+            &UnitEvent::RescanRequest => (),
             &UnitEvent::RescanStart => (),
             &UnitEvent::RescanFinish => (),
             &UnitEvent::Category(_) => (),

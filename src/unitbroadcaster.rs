@@ -235,6 +235,9 @@ pub enum UnitEvent {
     /// A whole category of units has been updated.
     Category(UnitCategoryEvent),
 
+    /// The system has requested a rescan take place.
+    RescanRequest,
+
     /// A rescan has started.
     RescanStart,
 

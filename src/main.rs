@@ -2,6 +2,7 @@ extern crate ctrlc;
 extern crate clap;
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 mod unit;
 mod unitbroadcaster;
@@ -12,6 +13,7 @@ mod units;
 mod unitwatcher;
 mod terminal;
 mod config;
+mod quiesce;
 
 use unitbroadcaster::{UnitEvent, UnitBroadcaster};
 use unitwatcher::UnitWatcher;
@@ -75,6 +77,8 @@ fn main() {
         unit_watcher.add_path(config_dir).expect("Unable to add config directory");
     }
 
+    let mut quiesce = quiesce::Quiesce::new(Duration::from_secs(3), &unit_broadcaster);
+
     use std::fs::File;
     use std::path::Path;
     use std::io::Write;
@@ -88,5 +92,6 @@ fn main() {
         i = i + 1;
         unit_loader.process_message(&msg);
         unit_library.process_message(&msg);
+        quiesce.process_message(&msg);
     }
 }

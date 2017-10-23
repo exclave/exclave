@@ -48,13 +48,6 @@ macro_rules! process_if {
     }
 }
 
-enum UnitDescription {
-    InterfaceDescription(InterfaceDescription),
-    JigDescription(JigDescription),
-    TestDescription(TestDescription),
-    ScenarioDescription(ScenarioDescription),
-}
-
 pub struct UnitLibrary {
     broadcaster: UnitBroadcaster,
 
@@ -252,25 +245,28 @@ impl UnitLibrary {
     }
 
     pub fn process_message(&mut self, evt: &UnitEvent) {
-        if let &UnitEvent::Status(ref msg) = evt {
-            let &UnitStatusEvent {ref name, ref status} = msg;
+        match evt {
+            &UnitEvent::Status(ref msg) =>  {
+                let &UnitStatusEvent {ref name, ref status} = msg;
 
-            match status {
-                &UnitStatus::LoadStarted(ref path) => {
-                    process_if!(self, name, status, UnitKind::Jig, path, JigDescription, dirty_jigs, jig_descriptions);
-                    process_if!(self, name, status, UnitKind::Interface, path, InterfaceDescription, dirty_interfaces, interface_descriptions);
-                    process_if!(self, name, status, UnitKind::Test, path, TestDescription, dirty_tests, test_descriptions);
-                    process_if!(self, name, status, UnitKind::Scenario, path, ScenarioDescription, dirty_scenarios, scenario_descriptions);
+                match status {
+                    &UnitStatus::LoadStarted(ref path) => {
+                        process_if!(self, name, status, UnitKind::Jig, path, JigDescription, dirty_jigs, jig_descriptions);
+                        process_if!(self, name, status, UnitKind::Interface, path, InterfaceDescription, dirty_interfaces, interface_descriptions);
+                        process_if!(self, name, status, UnitKind::Test, path, TestDescription, dirty_tests, test_descriptions);
+                        process_if!(self, name, status, UnitKind::Scenario, path, ScenarioDescription, dirty_scenarios, scenario_descriptions);
+                    }
+                    &UnitStatus::UpdateStarted(_) => (),
+                    &UnitStatus::UnloadStarted(ref path) => {
+                        self.unit_status
+                            .borrow_mut()
+                            .insert(name.clone(), UnitStatus::UnloadStarted(path.clone())); ()
+                    },
+                    _ => (),
                 }
-                &UnitStatus::UpdateStarted(_) => (),
-                &UnitStatus::UnloadStarted(ref path) => {self.unit_status
-                .borrow_mut()
-                .insert(name.clone(), UnitStatus::UnloadStarted(path.clone())); ()},
-                _ => (),
-            }
-
-            // FIXME: Have this call quiesce.
-            self.rescan();
+            },
+            &UnitEvent::RescanRequest => self.rescan(),
+            _ => (),
         }
 
         // Also pass the message on to the unit manager.
