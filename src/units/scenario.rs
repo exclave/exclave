@@ -236,7 +236,9 @@ impl ScenarioDescription {
 }
 
 pub struct Scenario {
-    name: UnitName,
+    id: UnitName,
+    name: String,
+    description: String,
     test_sequence: Vec<Arc<Mutex<Test>>>,
     tests: HashMap<UnitName, Arc<Mutex<Test>>>,
 }
@@ -257,7 +259,9 @@ impl Scenario {
         }
 
         Scenario {
-            name: desc.id.clone(),
+            id: desc.id.clone(),
+            name: desc.name.clone(),
+            description: desc.description.clone(),
             tests: tests,
             test_sequence: test_sequence,
         }
@@ -273,5 +277,13 @@ impl Scenario {
 
     pub fn uses_test(&self, test_name: &UnitName) -> bool {
         self.tests.get(test_name).is_some()
+    }
+
+    pub fn name(&self) -> &String {
+        &self.name
+    }
+
+    pub fn description(&self) -> &String {
+        &self.description
     }
 }

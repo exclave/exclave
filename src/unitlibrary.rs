@@ -148,7 +148,7 @@ impl UnitLibrary {
             let scenarios_rc = unit_manager.get_scenarios();
             let scenarios = scenarios_rc.borrow();
             for (scenario_name, scenario) in scenarios.iter() {
-                if scenario.lock().unwrap().uses_test(test_name) {
+                if scenario.uses_test(test_name) {
                     self.dirty_scenarios
                         .borrow_mut()
                         .insert(scenario_name.clone(), ());
@@ -203,15 +203,17 @@ impl UnitLibrary {
         // 5. Load all Interfaces that are compatible with this Jig.
         for (id, _) in self.dirty_interfaces.borrow().iter() {
         
-            match statuses.get(id).unwrap() {
+            if let Ok(interface) = match statuses.get(id).unwrap() {
                 &UnitStatus::LoadStarted(_) => {
-                    self.unit_manager.borrow_mut().load_interface(self.interface_descriptions.borrow().get(id).unwrap())
+                    self.unit_manager.borrow_mut().select_interface(self.interface_descriptions.borrow().get(id).unwrap())
                 }
                 &UnitStatus::UpdateStarted(_) => {
                     eprintln!("Updating interface in manager: {}", id);
-                    self.unit_manager.borrow_mut().load_interface(self.interface_descriptions.borrow().get(id).unwrap())
+                    self.unit_manager.borrow_mut().select_interface(self.interface_descriptions.borrow().get(id).unwrap())
                 }
                 x => panic!("Unexpected interface unit status: {}", x),
+            } {
+                self.unit_manager.borrow_mut().activate_interface(interface);
             }
         }
         self.dirty_interfaces.borrow_mut().clear();

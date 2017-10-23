@@ -58,8 +58,8 @@ impl UnitName {
         &self.kind
     }
 
-    pub fn to_string(&self) -> String {
-        format!("{}", self)
+    pub fn id(&self) -> &String {
+        &self.id
     }
 
     pub fn from_path(path: &Path) -> Result<Self, UnitNameError> {

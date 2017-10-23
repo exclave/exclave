@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt;
 use std::rc::Rc;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -13,13 +14,38 @@ use units::jig::{Jig, JigDescription};
 use units::scenario::{Scenario, ScenarioDescription};
 use units::test::{Test, TestDescription};
 
+#[derive(Debug)]
+pub enum FieldType {
+    Name,
+    Description,
+}
+
+impl fmt::Display for FieldType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &FieldType::Name => write!(f, "name"),
+            &FieldType::Description => write!(f, "description"),
+        }
+    }
+}
+
 /// Messages for Library -> Unit communication
+#[derive(Debug)]
 pub enum ManagerStatusMessage {
     /// Return the first name of the jig we're running on.
     Jig(UnitName /* Name of the jig */),
 
     /// Return a list of known scenarios.
     Scenarios(Vec<UnitName>),
+
+    /// Return the currently-selected scenario, if any
+    Scenario(Option<UnitName>),
+
+    /// Greeting identifying the server.
+    Hello(String /* Server identification name */),
+
+    /// Describes a Type of a particular Field on a given Unit
+    Describe(UnitKind, FieldType, String /* UnitId */, String /* Value */),
 }
 
 /// Messages for Unit -> Library communication
@@ -27,6 +53,15 @@ pub enum ManagerStatusMessage {
 pub enum ManagerControlMessageContents {
     /// Get a list of compatible, Selected scenarios.
     Scenarios,
+
+    /// Select a specific scenario.
+    Scenario(UnitName /* Scenario name */),
+
+    /// An error message from a particular interface.
+    Error(String /* Error message contents */),
+
+    /// Sent to a unit when it is first loaded, including "HELLO" messages.
+    InitialGreeting,
 
     /// Client sent an unimplemented message.
     Unimplemented(String /* verb */, String /* rest of line */),
@@ -58,13 +93,16 @@ pub struct UnitManager {
     jigs: RefCell<HashMap<UnitName, Arc<Mutex<Jig>>>>,
 
     /// Loaded Scenarios, available for checkout.
-    scenarios: Rc<RefCell<HashMap<UnitName, Arc<Mutex<Scenario>>>>>,
+    scenarios: Rc<RefCell<HashMap<UnitName, Scenario>>>,
 
     /// Loaded Tests, available for checkout.
     tests: Rc<RefCell<HashMap<UnitName, Arc<Mutex<Test>>>>>,
 
     /// Prototypical message sender that will be cloned and passed to each new unit.
     control_sender: Sender<ManagerControlMessage>,
+
+    /// The name of the currently-selected Scenario, if any
+    current_scenario: Rc<RefCell<Option<UnitName>>>,
 }
 
 impl UnitManager {
@@ -82,6 +120,7 @@ impl UnitManager {
             jigs: RefCell::new(HashMap::new()),
             scenarios: Rc::new(RefCell::new(HashMap::new())),
             tests: Rc::new(RefCell::new(HashMap::new())),
+            current_scenario: Rc::new(RefCell::new(None)),
 
             control_sender: sender,
         }
@@ -98,7 +137,7 @@ impl UnitManager {
         self.control_sender.clone()
     }
 
-    pub fn load_interface(&self, description: &InterfaceDescription) {
+    pub fn select_interface(&self, description: &InterfaceDescription) -> Result<Interface, ()> {
         // If the interface exists in the array already, then it is active and will be deactivated first.
         if let Some(old_interface) = self.interfaces.borrow_mut().remove(description.id()) {
             match old_interface.deactivate() {
@@ -125,18 +164,22 @@ impl UnitManager {
                         format!("{}", e),
                     )),
                 );
-                return;
+                return Err(());
             }
         };
 
         // Announce the fact that the interface was selected successfully.
         self.bc
             .broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected(description.id())));
+        Ok(new_interface)
+    }
 
-        match new_interface.activate(self, &*self.cfg.lock().unwrap()) {
+    pub fn activate_interface(&self, interface: Interface) {
+        // Activate the interface, which actually starts it up.
+        match interface.activate(self, &*self.cfg.lock().unwrap()) {
             Err(e) => {
             self.bc
-            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active_failed(description.id(), format!("{}", e))));
+            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active_failed(interface.id(), format!("{}", e))));
             return;
             },
             Ok(i) => i,
@@ -144,12 +187,12 @@ impl UnitManager {
 
         // Announce that the interface was successfully started.
         self.bc
-            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(description.id())));
+            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(interface.id())));
 
         self.interfaces
             .borrow_mut()
-            .insert(description.id().clone(),
-                    new_interface);
+            .insert(interface.id().clone(),
+                    interface);
     }
 
 
@@ -219,7 +262,7 @@ impl UnitManager {
 
         self.scenarios
             .borrow_mut()
-            .insert(description.id().clone(), Arc::new(Mutex::new(new_scenario)));
+            .insert(description.id().clone(), new_scenario);
         self.bc
             .broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected(description.id())));
     }
@@ -255,7 +298,7 @@ impl UnitManager {
         self.tests.clone()
     }
 
-    pub fn get_scenarios(&self) -> Rc<RefCell<HashMap<UnitName, Arc<Mutex<Scenario>>>>> {
+    pub fn get_scenarios(&self) -> Rc<RefCell<HashMap<UnitName, Scenario>>> {
         self.scenarios.clone()
     }
 
@@ -270,14 +313,48 @@ impl UnitManager {
         let &ManagerControlMessage {sender: ref sender_name, contents: ref msg} = msg;
 
         let response = match *msg {
-            ManagerControlMessageContents::Scenarios => ManagerStatusMessage::Scenarios(self.scenarios.borrow().keys().map(|x| x.clone()).collect()),
-            ManagerControlMessageContents::Unimplemented(ref verb, ref remainder) => { eprintln!("Unimplemented verb: {} {}", verb, remainder); return; },
+            ManagerControlMessageContents::Scenarios => vec![ManagerStatusMessage::Scenarios(self.scenarios.borrow().keys().map(|x| x.clone()).collect())],
+            ManagerControlMessageContents::Scenario(ref scenario_name) => {
+                *self.current_scenario.borrow_mut() = if self.scenarios.borrow().get(scenario_name).is_some() {
+                    Some(scenario_name.clone())
+                } else {
+                    None
+                }; 
+                vec![ManagerStatusMessage::Scenario(self.current_scenario.borrow().clone())]
+            },
+            ManagerControlMessageContents::Error(ref err) => {
+                //eprintln!("Error from interface: {}", err);
+                return;
+            },
+            ManagerControlMessageContents::InitialGreeting => {
+                // Send some initial information to the client.
+                let mut messages = vec![
+                    ManagerStatusMessage::Hello("Jig/20 1.0".to_owned()),
+                    ManagerStatusMessage::Scenarios(self.scenarios.borrow().keys().map(|x| x.clone()).collect()),
+                    ManagerStatusMessage::Scenario(self.current_scenario.borrow().clone())
+                ];
+                for (scenario_id, scenario) in self.scenarios.borrow().iter() {
+                    messages.push(ManagerStatusMessage::Describe(scenario_id.kind().clone(), FieldType::Name, scenario_id.id().clone(), scenario.name().clone()));
+                    messages.push(ManagerStatusMessage::Describe(scenario_id.kind().clone(), FieldType::Description, scenario_id.id().clone(), scenario.description().clone()));
+                }
+                messages
+            },
+            ManagerControlMessageContents::Unimplemented(ref verb, ref remainder) => {
+                //eprintln!("Unimplemented verb: {} {}", verb, remainder);
+                return;
+            },
         };
 
         match *sender_name.kind() {
-            UnitKind::Interface => 
-                self.interfaces.borrow().get(sender_name).expect("Unable to find Interface in the library").output_message(response),
-            _ => Ok(()),
-        }.expect("Unable to pass message to client");
+            UnitKind::Interface => {
+                let interface_table = self.interfaces.borrow();
+                let interface = interface_table.get(sender_name).expect("Unable to find Interface in the library");
+                for msg in response {
+                    println!(">>> Writing message out to {}: {:?}", sender_name, msg);
+                    interface.output_message(msg).expect("Unable to pass message to client");
+                }
+            },
+            _ => (),
+        }
     }
 }

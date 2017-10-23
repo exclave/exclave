@@ -206,17 +206,14 @@ impl Interface {
         let control_sender_id = self.id().clone();
         match self.format {
             InterfaceFormat::Text => {
-                // Send some initial information to the client.
-                writeln!(running, "HELLO Jig/20 1.0").unwrap();
-
                 // Pass control to an out-of-object thread, and shuttle communications
                 // from stdout onto the control_sender channel.
                 let thr_sender_id = control_sender_id.clone();
                 let thr_sender = control_sender.clone();
                 thread::spawn(move || Self::text_read(thr_sender_id, thr_sender, stdout));
-                thread::spawn(move || {
-                    Self::text_read(control_sender_id, control_sender, stderr)
-                });
+                let thr_sender_id = control_sender_id.clone();
+                let thr_sender = control_sender.clone();
+                thread::spawn(move || Self::text_read(thr_sender_id, thr_sender, stderr));
             }
             InterfaceFormat::JSON => {
                 ();
@@ -224,6 +221,9 @@ impl Interface {
         };
 
         *self.process.borrow_mut() = Some(running);
+
+        // Send some initial configuration to the client.
+        control_sender.send(ManagerControlMessage::new(&control_sender_id, ManagerControlMessageContents::InitialGreeting)).ok();
 
         Ok(())
     }
@@ -255,14 +255,23 @@ impl Interface {
         let process = process_opt.as_mut().unwrap();
 
         let result = match msg {
-            ManagerStatusMessage::Jig(j) => writeln!(process, "JIG {}", j.to_string()),
+            ManagerStatusMessage::Jig(j) => writeln!(process, "JIG {}", j),
+            ManagerStatusMessage::Hello(id) => writeln!(process, "HELLO {}", id),
+            ManagerStatusMessage::Scenario(name) => match name {
+                Some(s) => writeln!(process, "SCENARIO {}", s),
+                None => writeln!(process, "SCENARIO"),
+            },
             ManagerStatusMessage::Scenarios(list) => {
                 write!(process, "SCENARIOS").expect("Couldn't write SCENARIOS verb to output");
                 for test_name in list {
                     write!(process, " {}", test_name).expect("Couldn't write test name to output");
                 }
                 writeln!(process, "")
-            } /*
+            },
+            ManagerStatusMessage::Describe(class, field, name, value) => {
+                writeln!(process, "DESCRIBE {} {} {} {}", class, field, name, value)
+            }
+             /*
             BroadcastMessageContents::Log(l) => writeln!(
                 stdin,
                 "LOG {}\t{}\t{}\t{}\t{}\t{}",
@@ -277,9 +286,6 @@ impl Interface {
                     .replace("\n", "\\n")
                     .replace("\r", "\\r")
             ),
-            BroadcastMessageContents::Describe(class, field, name, value) => {
-                writeln!(stdin, "DESCRIBE {} {} {} {}", class, field, name, value)
-            }
             BroadcastMessageContents::Scenario(name) => writeln!(stdin, "SCENARIO {}", name),
             //            BroadcastMessageContents::Hello(name) => writeln!(stdin,
             //                                                "HELLO {}", name),
@@ -335,8 +341,12 @@ impl Interface {
 
             let response = match verb.as_str() {
                 "scenarios" => ManagerControlMessageContents::Scenarios,
+                "scenario" => match UnitName::from_str(words.get(0).unwrap_or(&"".to_owned()).to_lowercase().as_str(), "scenario") {
+                        Err(e) => ManagerControlMessageContents::Error(format!("Invalid scenario name: {}", e)),
+                        Ok(o) => ManagerControlMessageContents::Scenario(o),
+                    }
+                ,
                 /*
-                "scenario" => ControlMessageContents::Scenario(words[0].to_lowercase()),
                 "tests" => {
                     if words.is_empty() {
                         ControlMessageContents::GetTests(None)
