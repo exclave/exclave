@@ -168,6 +168,13 @@ impl TerminalInterface {
                     )
                     .expect("Unable to write unit");
             }
+
+            if let Some(ref logs) = self.logs.get(&category_type) {
+                for log_line in logs.iter() {
+                    line_count = line_count + 1;
+                    self.terminal.write_line(format!("  {}", log_line).as_str()).expect("Unable to write log");
+                }
+            }
         }
         self.terminal.flush().expect("Couldn't redraw screen");
         self.last_line_count = line_count;
