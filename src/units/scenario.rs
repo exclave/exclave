@@ -275,6 +275,10 @@ impl Scenario {
         test_sequence
     }
 
+    pub fn tests(&self) -> &HashMap<UnitName, Arc<Mutex<Test>>> {
+        &self.tests
+    }
+
     pub fn id(&self) -> &UnitName {
         &self.id
     }

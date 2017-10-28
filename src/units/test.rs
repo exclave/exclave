@@ -203,6 +203,8 @@ impl TestDescription {
 
 pub struct Test {
     id: UnitName,
+    name: String,
+    description: String,
     requirements: Vec<UnitName>,
     suggestions: Vec<UnitName>,
     provides: Vec<UnitName>,
@@ -212,6 +214,8 @@ impl Test {
     pub fn new(desc: &TestDescription) -> Test {
         Test {
             id: desc.id.clone(),
+            name: desc.name.clone(),
+            description: desc.description.clone(),
             requirements: desc.requires.clone(),
             suggestions: desc.suggests.clone(),
             provides: desc.provides.clone(),
@@ -228,6 +232,14 @@ impl Test {
 
     pub fn id(&self) -> &UnitName {
         &self.id
+    }
+
+    pub fn name(&self) -> &String {
+        &self.name
+    }
+
+    pub fn description(&self) -> &String {
+        &self.description
     }
 }
 

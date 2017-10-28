@@ -351,12 +351,20 @@ impl UnitManager {
                 }
             }
             ManagerControlMessageContents::Scenario(ref scenario_name) => {
-                *self.current_scenario.borrow_mut() = if self.scenarios.borrow().get(scenario_name).is_some() {
-                    Some(scenario_name.clone())
+                if let Some(scenario) = self.scenarios.borrow().get(scenario_name) {
+                    *self.current_scenario.borrow_mut() = Some(scenario_name.clone());
+                    let mut messages = vec![ManagerStatusMessage::Scenario(Some(scenario_name.clone()))];
+                    for (test_id, test_mtx) in scenario.tests() {
+                        let test = test_mtx.lock().unwrap();
+                        messages.push(ManagerStatusMessage::Describe(test_id.kind().clone(), FieldType::Name, test_id.id().clone(), test.name().clone()));
+                        messages.push(ManagerStatusMessage::Describe(test_id.kind().clone(), FieldType::Description, test_id.id().clone(), test.description().clone()));
+                    }
+                    messages.push(ManagerStatusMessage::Tests(scenario.id().clone(), scenario.test_sequence()));
+                    messages
                 } else {
-                    None
-                }; 
-                vec![ManagerStatusMessage::Scenario(self.current_scenario.borrow().clone())]
+                    *self.current_scenario.borrow_mut() = None;
+                    vec![ManagerStatusMessage::Scenario(None)]
+                }
             },
             ManagerControlMessageContents::Error(ref err) => {
                 self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), err.clone())));
