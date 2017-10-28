@@ -377,6 +377,7 @@ impl Interface {
                     }
                 },
                 "jig" => ManagerControlMessageContents::Jig,
+                "log" => ManagerControlMessageContents::Log(words.join(" ")),
                 /*
                 "start" => {
                     if words.is_empty() {
@@ -395,7 +396,6 @@ impl Interface {
                         ControlMessageContents::Shutdown(Some(words.join(" ")))
                     }
                 }
-                "log" => ControlMessageContents::Log(words.join(" ")),
                 */
                 v => ManagerControlMessageContents::Unimplemented(v.to_owned(), words.join(" ")),
             };

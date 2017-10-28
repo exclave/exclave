@@ -234,6 +234,7 @@ impl UnitCategoryEvent {
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub enum LogType {
     Error,
+    Info,
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
@@ -251,12 +252,20 @@ impl LogEntry {
             log_message: message,
         }
     }
+    pub fn new_info(id: UnitName, message: String) -> Self {
+        LogEntry {
+            unit: id,
+            log_type: LogType::Info,
+            log_message: message,
+        }
+    }
 }
 
 impl fmt::Display for LogEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.log_type {
             LogType::Error => write!(f, "ERROR {}: {}", self.unit, self.log_message),
+            LogType::Info => write!(f, "INFO {}: {}", self.unit, self.log_message),
         }
     }
 }

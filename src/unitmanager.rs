@@ -77,6 +77,9 @@ pub enum ManagerControlMessageContents {
 
     /// Client sent an unimplemented message.
     Unimplemented(String /* verb */, String /* rest of line */),
+
+    /// Send an INFO message to the logging system
+    Log(String /* log message */),
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
@@ -355,14 +358,14 @@ impl UnitManager {
         match *msg {
             ManagerControlMessageContents::Scenarios => self.send_scenarios(sender_name),
             ManagerControlMessageContents::GetTests(ref scenario_name) => self.send_tests(sender_name, scenario_name),
+            ManagerControlMessageContents::Log(ref txt) => self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(sender_name.clone(), txt.clone()))),
             ManagerControlMessageContents::Scenario(ref new_scenario_name) => {
                 if self.scenarios.borrow().get(new_scenario_name).is_some() {
                     *self.current_scenario.borrow_mut() = Some(new_scenario_name.clone());
+                    self.send_scenario(sender_name, &Some(new_scenario_name.clone()));
                 } else {
                     self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unable to find scenario {}", new_scenario_name))));
-                    return;
                 }
-                self.send_scenario(sender_name, &Some(new_scenario_name.clone()));
             },
             ManagerControlMessageContents::Error(ref err) => {
                 self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), err.clone())));
