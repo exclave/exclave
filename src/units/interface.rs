@@ -399,9 +399,10 @@ impl Interface {
 
             // If the send fails, that means the other end has closed the pipe.
             if let Err(_) = control.send(ManagerControlMessage::new(&id, response)) {
-                return;
+                break;
             }
         }
+        control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::ChildExited)).expect("interface couldn't send exit message to controller");
     }
 }
 
