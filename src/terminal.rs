@@ -23,7 +23,7 @@ pub struct TerminalInterface {
     unit_status: HashMap<UnitKind, BTreeMap<UnitName, UnitStatus>>,
 
     /// A hashmap of the last few log entries
-    logs: HashMap<UnitKind, Vec<LogEntry>>,
+    logs: Vec<LogEntry>,
 
     /// The current stdout of the terminal.
     terminal: Term,
@@ -56,8 +56,8 @@ impl TerminalInterface {
                 category_status: BTreeMap::new(),
                 terminal: stdout,
                 last_line_count: 0,
-                logs: HashMap::new(),
-                log_history: 4,
+                logs: vec![],
+                log_history: 10,
             };
 
             while let Ok(event) = receiver.recv() {
@@ -92,13 +92,9 @@ impl TerminalInterface {
             }
             UnitEvent::Log(ref log) => {
                 // Ensure we have a vec for the logs to be stored.
-                if !self.logs.contains_key(&log.id().kind()) {
-                    self.logs.insert(log.id().kind().clone(), vec![]);
-                }
-                let logs = self.logs.get_mut(log.id().kind()).unwrap();
-                logs.push(log.clone());
-                if logs.len() > self.log_history {
-                    logs.remove(0);
+                self.logs.push(log.clone());
+                if self.logs.len() > self.log_history {
+                    self.logs.remove(0);
                 }
             }
             UnitEvent::RescanStart => (),
@@ -168,13 +164,15 @@ impl TerminalInterface {
                     )
                     .expect("Unable to write unit");
             }
+        }
 
-            if let Some(ref logs) = self.logs.get(&category_type) {
-                for log_line in logs.iter() {
-                    line_count = line_count + 1;
-                    self.terminal.write_line(format!("  {}", log_line).as_str()).expect("Unable to write log");
-                }
-            }
+        if self.logs.len() > 0 {
+            line_count = line_count + 1;
+            self.terminal.write_line(format!("Logs: ").as_str()).expect("Unable to write log");
+        }
+        for log_line in self.logs.iter() {
+            line_count = line_count + 1;
+            self.terminal.write_line(format!("  {}", log_line).as_str()).expect("Unable to write log");
         }
         self.terminal.flush().expect("Couldn't redraw screen");
         self.last_line_count = line_count;
