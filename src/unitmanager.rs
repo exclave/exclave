@@ -63,6 +63,9 @@ pub enum ManagerControlMessageContents {
     /// Sent to a unit when it is first loaded, including "HELLO" messages.
     InitialGreeting,
 
+    /// Indicates the child object terminated unexpectedly.
+    UnexpectedExit,
+
     /// Client sent an unimplemented message.
     Unimplemented(String /* verb */, String /* rest of line */),
 }
@@ -339,6 +342,10 @@ impl UnitManager {
                 }
                 messages
             },
+            ManagerControlMessageContents::UnexpectedExit => {
+                self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_active_failed(sender_name, "Unit unexpectedly exited".to_owned())));
+                return;
+            }
             ManagerControlMessageContents::Unimplemented(ref verb, ref remainder) => {
                 //eprintln!("Unimplemented verb: {} {}", verb, remainder);
                 return;
@@ -350,7 +357,6 @@ impl UnitManager {
                 let interface_table = self.interfaces.borrow();
                 let interface = interface_table.get(sender_name).expect("Unable to find Interface in the library");
                 for msg in response {
-                    println!(">>> Writing message out to {}: {:?}", sender_name, msg);
                     interface.output_message(msg).expect("Unable to pass message to client");
                 }
             },
