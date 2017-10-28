@@ -376,6 +376,7 @@ impl Interface {
                         }
                     }
                 },
+                "jig" => ManagerControlMessageContents::Jig,
                 /*
                 "start" => {
                     if words.is_empty() {
@@ -386,7 +387,6 @@ impl Interface {
                 }
                 "abort" => ControlMessageContents::AbortTests,
                 "pong" => ControlMessageContents::Pong(words[0].to_lowercase()),
-                "jig" => ControlMessageContents::GetJig,
                 "hello" => ControlMessageContents::Hello(words.join(" ")),
                 "shutdown" => {
                     if words.is_empty() {

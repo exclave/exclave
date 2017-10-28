@@ -54,6 +54,9 @@ pub enum ManagerStatusMessage {
 /// Messages for Unit -> Library communication
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub enum ManagerControlMessageContents {
+    /// Get the current Jig
+    Jig,
+
     /// Get a list of compatible, Selected scenarios.
     Scenarios,
 
@@ -112,6 +115,9 @@ pub struct UnitManager {
 
     /// The name of the currently-selected Scenario, if any
     current_scenario: Rc<RefCell<Option<UnitName>>>,
+
+    /// The name of the currently-selected Jig, if any
+    current_jig: Rc<RefCell<Option<UnitName>>>,
 }
 
 impl UnitManager {
@@ -130,6 +136,7 @@ impl UnitManager {
             scenarios: Rc::new(RefCell::new(HashMap::new())),
             tests: Rc::new(RefCell::new(HashMap::new())),
             current_scenario: Rc::new(RefCell::new(None)),
+            current_jig: Rc::new(RefCell::new(None)),
 
             control_sender: sender,
         }
@@ -205,7 +212,7 @@ impl UnitManager {
     }
 
 
-    pub fn load_jig(&self, description: &JigDescription) {
+    pub fn select_jig(&self, description: &JigDescription) -> Result<Jig, ()> {
         self.jigs.borrow_mut().remove(description.id());
 
         // "Select" the Jig, which means we can activate it later on.
@@ -218,14 +225,38 @@ impl UnitManager {
                         format!("{}", e),
                     )),
                 );
-                return;
+                return Err(());
             }
         };
-        self.jigs
-            .borrow_mut()
-            .insert(description.id().clone(), Arc::new(Mutex::new(new_jig)));
+
         self.bc
             .broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected(description.id())));
+        Ok(new_jig)
+    }
+
+    /// Announce that the jig was successfully started.
+    /// Only do so if there aren't any other valid, active jigs.
+    pub fn activate_jig(&self, jig: Jig) {
+        let mut current_jig = self.current_jig.borrow_mut();
+        if let &Some(ref current_jig_name) = &*current_jig {
+            // Don't continue if the jig is already loaded.
+            if self.jigs.borrow().get(&current_jig_name).is_some() {
+                return;
+            }
+            // Don't re-load the current jig.
+            if current_jig_name == jig.id() {
+                return;
+            }
+        }
+        *current_jig = Some(jig.id().clone());
+        *self.current_scenario.borrow_mut() = jig.default_scenario().clone();
+
+        self.bc
+            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(jig.id())));
+
+        self.jigs
+            .borrow_mut()
+            .insert(jig.id().clone(), Arc::new(Mutex::new(jig)));
     }
 
     pub fn load_test(&self, description: &TestDescription) {
@@ -321,83 +352,119 @@ impl UnitManager {
     fn manager_request(&self, msg: &ManagerControlMessage) {
         let &ManagerControlMessage {sender: ref sender_name, contents: ref msg} = msg;
 
-        let response = match *msg {
-            ManagerControlMessageContents::Scenarios => vec![ManagerStatusMessage::Scenarios(self.scenarios.borrow().keys().map(|x| x.clone()).collect())],
-            ManagerControlMessageContents::GetTests(ref scenario_name) => {
-                match *scenario_name {
-                    None => if let Some(ref scenario_name) = *self.current_scenario.borrow() {
-                        let scenarios = self.scenarios.borrow();
-                        match scenarios.get(scenario_name) {
-                            Some(ref scenario) => vec![ManagerStatusMessage::Tests(scenario.id().clone(), scenario.test_sequence())],
-                            None => {
-                                self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unable to list tests, default scenario {} not found", scenario_name))));
-                                vec![]
-                            } 
-                        }
-                    } else {
-                        self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), "unable to list tests, and no default scenario found".to_owned())));
-                        vec![]
-                    },
-                    Some(ref scenario_name) => {
-                        let scenarios = self.scenarios.borrow();
-                        match scenarios.get(scenario_name) {
-                            Some(ref scenario) => vec![ManagerStatusMessage::Tests(scenario.id().clone(), scenario.test_sequence())],
-                            None => {
-                                self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unable to list tests, scenario {} not found", scenario_name))));
-                                vec![]
-                            },
-                        }
-                    }
-                }
-            }
-            ManagerControlMessageContents::Scenario(ref scenario_name) => {
-                if let Some(scenario) = self.scenarios.borrow().get(scenario_name) {
-                    *self.current_scenario.borrow_mut() = Some(scenario_name.clone());
-                    let mut messages = vec![ManagerStatusMessage::Scenario(Some(scenario_name.clone()))];
-                    for (test_id, test_mtx) in scenario.tests() {
-                        let test = test_mtx.lock().unwrap();
-                        messages.push(ManagerStatusMessage::Describe(test_id.kind().clone(), FieldType::Name, test_id.id().clone(), test.name().clone()));
-                        messages.push(ManagerStatusMessage::Describe(test_id.kind().clone(), FieldType::Description, test_id.id().clone(), test.description().clone()));
-                    }
-                    messages.push(ManagerStatusMessage::Tests(scenario.id().clone(), scenario.test_sequence()));
-                    messages
+        match *msg {
+            ManagerControlMessageContents::Scenarios => self.send_scenarios(sender_name),
+            ManagerControlMessageContents::GetTests(ref scenario_name) => self.send_tests(sender_name, scenario_name),
+            ManagerControlMessageContents::Scenario(ref new_scenario_name) => {
+                if self.scenarios.borrow().get(new_scenario_name).is_some() {
+                    *self.current_scenario.borrow_mut() = Some(new_scenario_name.clone());
                 } else {
-                    *self.current_scenario.borrow_mut() = None;
-                    vec![ManagerStatusMessage::Scenario(None)]
+                    self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unable to find scenario {}", new_scenario_name))));
+                    return;
                 }
+                self.send_scenario(sender_name, &Some(new_scenario_name.clone()));
             },
             ManagerControlMessageContents::Error(ref err) => {
                 self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), err.clone())));
-                return;
             },
+            ManagerControlMessageContents::Jig => self.send_jig(sender_name),
             ManagerControlMessageContents::InitialGreeting => {
                 // Send some initial information to the client.
-                let mut messages = vec![
-                    ManagerStatusMessage::Hello("Jig/20 1.0".to_owned()),
-                    ManagerStatusMessage::Scenarios(self.scenarios.borrow().keys().map(|x| x.clone()).collect()),
-                    ManagerStatusMessage::Scenario(self.current_scenario.borrow().clone())
-                ];
-                for (scenario_id, scenario) in self.scenarios.borrow().iter() {
-                    messages.push(ManagerStatusMessage::Describe(scenario_id.kind().clone(), FieldType::Name, scenario_id.id().clone(), scenario.name().clone()));
-                    messages.push(ManagerStatusMessage::Describe(scenario_id.kind().clone(), FieldType::Description, scenario_id.id().clone(), scenario.description().clone()));
-                }
-                messages
+                self.send_hello(sender_name);
+                self.send_jig(sender_name);
+                self.send_scenarios(sender_name);
+                self.send_scenario(sender_name, &*self.current_scenario.borrow());
             },
             ManagerControlMessageContents::ChildExited => {
                 self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_active_failed(sender_name, "Unit unexpectedly exited".to_owned())));
-                return;
             }
             ManagerControlMessageContents::Unimplemented(ref verb, ref remainder) => {
                 self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unimplemented verb: {} (args: {})", verb, remainder))));
-                return;
             },
-        };
+        }
+    }
 
+    pub fn send_hello(&self, sender_name: &UnitName) {
+        self.send_responses(sender_name, vec![ManagerStatusMessage::Hello("Jig/20 1.0".to_owned())]);
+    }
+
+    pub fn send_jig(&self, sender_name: &UnitName) {
+        let messages = match *self.current_jig.borrow() {
+            None => vec![ManagerStatusMessage::Jig(UnitName::from_str("", "jig").unwrap())],
+            Some(ref jig_name) => {
+                let jigs = self.jigs.borrow();
+                // Unwrap, because the jig most definitely should exist.
+                let jig = jigs.get(jig_name).unwrap().lock().unwrap();
+                vec![
+                    ManagerStatusMessage::Jig(jig.id().clone()),
+                    ManagerStatusMessage::Describe(jig.id().kind().clone(), FieldType::Name, jig.id().id().clone(), jig.name().clone()),
+                    ManagerStatusMessage::Describe(jig.id().kind().clone(), FieldType::Description, jig.id().id().clone(), jig.description().clone())
+                ]
+            }
+        };
+        self.send_responses(sender_name, messages);
+    }
+
+    pub fn send_scenarios(&self, sender_name: &UnitName) {
+        let mut messages = vec![ManagerStatusMessage::Scenarios(self.scenarios.borrow().keys().map(|x| x.clone()).collect())];
+        for (scenario_id, scenario) in self.scenarios.borrow().iter() {
+            messages.push(ManagerStatusMessage::Describe(scenario_id.kind().clone(), FieldType::Name, scenario_id.id().clone(), scenario.name().clone()));
+            messages.push(ManagerStatusMessage::Describe(scenario_id.kind().clone(), FieldType::Description, scenario_id.id().clone(), scenario.description().clone()));
+        }
+        self.send_responses(sender_name, messages);
+    }
+
+    pub fn send_scenario(&self, sender_name: &UnitName, scenario_name_opt: &Option<UnitName>) {
+        let messages = if let &Some(ref scenario_name) = scenario_name_opt {
+            if let Some(scenario) = self.scenarios.borrow().get(scenario_name) {
+                let mut messages = vec![ManagerStatusMessage::Scenario(Some(scenario_name.clone()))];
+                for (test_id, test_mtx) in scenario.tests() {
+                    let test = test_mtx.lock().unwrap();
+                    messages.push(ManagerStatusMessage::Describe(test_id.kind().clone(), FieldType::Name, test_id.id().clone(), test.name().clone()));
+                    messages.push(ManagerStatusMessage::Describe(test_id.kind().clone(), FieldType::Description, test_id.id().clone(), test.description().clone()));
+                }
+                messages.push(ManagerStatusMessage::Tests(scenario.id().clone(), scenario.test_sequence()));
+                messages
+            } else {
+                vec![ManagerStatusMessage::Scenario(None)]
+            }
+        } else {
+            vec![ManagerStatusMessage::Scenario(None)]
+        };
+        self.send_responses(sender_name, messages);
+    }
+
+    pub fn send_tests(&self, sender_name: &UnitName, scenario_name_opt: &Option<UnitName>) {
+        match *scenario_name_opt {
+            None => if let Some(ref scenario_name) = *self.current_scenario.borrow() {
+                let scenarios = self.scenarios.borrow();
+                match scenarios.get(scenario_name) {
+                    Some(ref scenario) => self.send_responses(sender_name, vec![ManagerStatusMessage::Tests(scenario.id().clone(), scenario.test_sequence())]),
+                    None => {
+                        self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unable to list tests, default scenario {} not found", scenario_name))));
+                    } 
+                }
+            } else {
+                self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), "unable to list tests, and no default scenario found".to_owned())));
+            },
+            Some(ref scenario_name) => {
+                let scenarios = self.scenarios.borrow();
+                match scenarios.get(scenario_name) {
+                    Some(ref scenario) => self.send_responses(sender_name, vec![ManagerStatusMessage::Tests(scenario.id().clone(), scenario.test_sequence())]),
+                    None => {
+                        self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unable to list tests, scenario {} not found", scenario_name))));
+                    },
+                }
+            }
+        }
+    }
+
+    pub fn send_responses(&self, sender_name: &UnitName, messages: Vec<ManagerStatusMessage>) {
         match *sender_name.kind() {
             UnitKind::Interface => {
                 let interface_table = self.interfaces.borrow();
                 let interface = interface_table.get(sender_name).expect("Unable to find Interface in the library");
-                for msg in response {
+                for msg in messages {
                     interface.output_message(msg).expect("Unable to pass message to client");
                 }
             },

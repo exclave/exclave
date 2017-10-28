@@ -13,10 +13,6 @@ use unitmanager::UnitManager;
 use self::systemd_parser::items::DirectiveEntry;
 use self::runny::Runny;
 
-pub struct Jig {
-    name: UnitName,
-}
-
 /// A struct defining an in-memory representation of a .jig file
 pub struct JigDescription {
     /// The id of the unit (including the kind)
@@ -29,7 +25,7 @@ pub struct JigDescription {
     description: String,
 
     /// Name of the scenario to run by default, if any
-    default_scenario: Option<String>,
+    default_scenario: Option<UnitName>,
 
     /// The default directory for programs on this jig, if any
     working_directory: Option<String>,
@@ -74,6 +70,12 @@ impl JigDescription {
                     "TestFile" => {
                         jig_description.test_file = match directive.value() {
                             Some(s) => Some(s.to_owned()),
+                            None => None,
+                        }
+                    }
+                    "DefaultScenario" => {
+                        jig_description.default_scenario = match directive.value() {
+                            Some(s) => Some(UnitName::from_str(s, "scenario")?),
                             None => None,
                         }
                     }
@@ -150,15 +152,37 @@ impl JigDescription {
     }
 }
 
+pub struct Jig {
+    id: UnitName,
+    name: String,
+    description: String,
+    default_scenario: Option<UnitName>,
+}
+
 impl Jig {
     pub fn new(desc: &JigDescription) -> Jig {
         Jig {
-            name: desc.id.clone(),
+            id: desc.id.clone(),
+            name: desc.name.clone(),
+            description: desc.description.clone(),
+            default_scenario: desc.default_scenario.clone(),
         }
     }
 
-    pub fn name(&self) -> &UnitName {
+    pub fn id(&self) -> &UnitName {
+        &self.id
+    }
+
+    pub fn name(&self) -> &String {
         &self.name
+    }
+
+    pub fn description(&self) -> &String {
+        &self.description
+    }
+
+    pub fn default_scenario(&self) -> &Option<UnitName> {
+        &self.default_scenario
     }
 
     pub fn activate(&self) -> Result<(), UnitActivateError> {

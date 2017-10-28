@@ -188,14 +188,16 @@ impl UnitLibrary {
 
         // 4. Load all Jigs that are valid.
         for (id, _) in self.dirty_jigs.borrow().iter() {
-            match statuses.get(id).unwrap() {
+            if let Ok(jig) = match statuses.get(id).unwrap() {
                 &UnitStatus::LoadStarted(_) => {
-                    self.unit_manager.borrow_mut().load_jig(self.jig_descriptions.borrow().get(id).unwrap())
+                    self.unit_manager.borrow_mut().select_jig(self.jig_descriptions.borrow().get(id).unwrap())
                 }
                 &UnitStatus::UpdateStarted(_) => {
-                    self.unit_manager.borrow_mut().load_jig(self.jig_descriptions.borrow().get(id).unwrap())
+                    self.unit_manager.borrow_mut().select_jig(self.jig_descriptions.borrow().get(id).unwrap())
                 }
                 x => panic!("Unexpected jig unit status: {}", x),
+            } {
+                self.unit_manager.borrow_mut().activate_jig(jig);
             }
         }
         self.dirty_jigs.borrow_mut().clear();

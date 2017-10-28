@@ -251,9 +251,6 @@ impl LogEntry {
             log_message: message,
         }
     }
-    pub fn id(&self) -> &UnitName {
-        &self.unit
-    }
 }
 
 impl fmt::Display for LogEntry {
