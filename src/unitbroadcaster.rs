@@ -32,7 +32,11 @@ pub enum UnitStatus {
     /// The unit is currently in use
     Active,
 
-    /// We tried to activate, but failed to do so
+    /// We tried to activate, but failed to do so.  This may happen with or without
+    /// an "Active" message being sent.  I.e. if the unit is Selected and attempts
+    /// to move into the Active state but fails, then ActivationFailed will be sent.
+    /// If instead the unit is Active for a while but then fails at a later time,
+    /// ActivationFailed will be sent.
     ActivationFailed(String /* reason */),
 
     /// The unit was active, then stopped being active due to finishing successfully
