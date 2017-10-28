@@ -23,6 +23,7 @@ impl UnitLoader {
             &UnitEvent::RescanStart => (),
             &UnitEvent::RescanFinish => (),
             &UnitEvent::Category(_) => (),
+            &UnitEvent::Log(_) => (),
             &UnitEvent::ManagerRequest(_) => (),
         }
     }

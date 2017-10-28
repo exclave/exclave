@@ -267,6 +267,18 @@ impl Scenario {
         }
     }
 
+    pub fn test_sequence(&self) -> Vec<UnitName> {
+        let mut test_sequence = vec![];
+        for test in &self.test_sequence {
+            test_sequence.push(test.lock().unwrap().id().clone());
+        }
+        test_sequence
+    }
+
+    pub fn id(&self) -> &UnitName {
+        &self.id
+    }
+
     pub fn activate(&self) -> Result<(), UnitActivateError> {
         Ok(())
     }

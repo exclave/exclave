@@ -232,12 +232,48 @@ impl UnitCategoryEvent {
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
+pub enum LogType {
+    Error,
+}
+
+#[derive(PartialEq, Eq, Hash, Debug, Clone)]
+pub struct LogEntry {
+    unit: UnitName,
+    log_type: LogType,
+    log_message: String,
+}
+
+impl LogEntry {
+    pub fn new_error(id: UnitName, message: String) -> Self {
+        LogEntry {
+            unit: id,
+            log_type: LogType::Error,
+            log_message: message,
+        }
+    }
+    pub fn id(&self) -> &UnitName {
+        &self.unit
+    }
+}
+
+impl fmt::Display for LogEntry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.log_type {
+            LogType::Error => write!(f, "ERROR {}: {}", self.unit, self.log_message),
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub enum UnitEvent {
     /// A unit has updated its status.
     Status(UnitStatusEvent),
 
     /// A whole category of units has been updated.
     Category(UnitCategoryEvent),
+
+    /// A generic log message.
+    Log(LogEntry),
 
     /// The system has requested a rescan take place.
     RescanRequest,

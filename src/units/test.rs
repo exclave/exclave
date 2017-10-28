@@ -225,6 +225,10 @@ impl Test {
     pub fn deactivate(&self) -> Result<(), UnitDeactivateError> {
         Ok(())
     }
+
+    pub fn id(&self) -> &UnitName {
+        &self.id
+    }
 }
 
 impl Dependency<UnitName> for Test {

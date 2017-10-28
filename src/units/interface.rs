@@ -3,7 +3,7 @@ extern crate systemd_parser;
 
 use std::cell::RefCell;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Read, Write, Error, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 use std::thread;
@@ -247,38 +247,45 @@ impl Interface {
     }
 
     /// Cause a MessageControlContents to be written out.
-    pub fn output_message(&self, msg: ManagerStatusMessage) -> Result<(), String> {
+    pub fn output_message(&self, msg: ManagerStatusMessage) -> Result<(), Error> {
         match self.format {
             InterfaceFormat::Text => self.text_write(msg),
             InterfaceFormat::JSON => self.json_write(msg),
         }
     }
 
-    fn json_write(&self, _: ManagerStatusMessage) -> Result<(), String> {
+    fn json_write(&self, _: ManagerStatusMessage) -> Result<(), Error> {
         unimplemented!();
     }
 
     /// Write a UnitInterfaceMessage to a Text-formatted output.
-    fn text_write(&self, msg: ManagerStatusMessage) -> Result<(), String> {
+    fn text_write(&self, msg: ManagerStatusMessage) -> Result<(), Error> {
         let mut process_opt = self.process.borrow_mut();
 
         if process_opt.is_none() {
-            return Err("No process running".to_owned());
+            return Err(Error::new(ErrorKind::Other, "no process running"));
         }
 
         let process = process_opt.as_mut().unwrap();
 
-        let result = match msg {
+        match msg {
             ManagerStatusMessage::Jig(j) => writeln!(process, "JIG {}", j),
             ManagerStatusMessage::Hello(id) => writeln!(process, "HELLO {}", id),
+            ManagerStatusMessage::Tests(scenario, tests) => {
+                write!(process, "TESTS {}", scenario)?;
+                for test in &tests {
+                    write!(process, " {}", test)?;
+                }
+                writeln!(process, "")
+            },
             ManagerStatusMessage::Scenario(name) => match name {
                 Some(s) => writeln!(process, "SCENARIO {}", s),
                 None => writeln!(process, "SCENARIO"),
             },
             ManagerStatusMessage::Scenarios(list) => {
-                write!(process, "SCENARIOS").expect("Couldn't write SCENARIOS verb to output");
+                write!(process, "SCENARIOS")?;
                 for test_name in list {
-                    write!(process, " {}", test_name).expect("Couldn't write test name to output");
+                    write!(process, " {}", test_name)?;
                 }
                 writeln!(process, "")
             },
@@ -324,10 +331,6 @@ impl Interface {
                 writeln!(stdin, "FINISH {} {} {}", scenario, result, reason)
             }
             */
-        };
-        match result {
-            Ok(_) => Ok(()),
-            Err(e) => Err(format!("{:?}", e)),
         }
     }
 
@@ -360,14 +363,17 @@ impl Interface {
                         Ok(o) => ManagerControlMessageContents::Scenario(o),
                     }
                 ,
-                /*
                 "tests" => {
                     if words.is_empty() {
-                        ControlMessageContents::GetTests(None)
+                        ManagerControlMessageContents::GetTests(None)
                     } else {
-                        ControlMessageContents::GetTests(Some(words[0].to_lowercase()))
+                        match UnitName::from_str(words[0].to_lowercase().as_str(), "test") {
+                            Ok(scenario_name) => ManagerControlMessageContents::GetTests(Some(scenario_name)),
+                            Err(e) => ManagerControlMessageContents::Error(format!("Invalid test name specified: {}", e)),
+                        }
                     }
-                }
+                },
+                /*
                 "start" => {
                     if words.is_empty() {
                         ControlMessageContents::StartScenario(None)

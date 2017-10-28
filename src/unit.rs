@@ -18,6 +18,9 @@ pub enum UnitKind {
     Scenario,
     Test,
     Interface,
+
+    /// Exclave-generated types
+    Internal,
 }
 
 impl fmt::Display for UnitKind {
@@ -27,6 +30,7 @@ impl fmt::Display for UnitKind {
             &UnitKind::Scenario => write!(f, "scenario"),
             &UnitKind::Test => write!(f, "test"),
             &UnitKind::Interface => write!(f, "interface"),
+            &UnitKind::Internal => write!(f, "internal"),
         }
     }
 }

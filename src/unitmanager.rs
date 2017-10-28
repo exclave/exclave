@@ -8,7 +8,7 @@ use std::thread;
 
 use config::Config;
 use unit::{UnitName, UnitKind};
-use unitbroadcaster::{UnitBroadcaster, UnitEvent, UnitStatusEvent};
+use unitbroadcaster::{UnitBroadcaster, UnitEvent, UnitStatusEvent, LogEntry};
 use units::interface::{Interface, InterfaceDescription};
 use units::jig::{Jig, JigDescription};
 use units::scenario::{Scenario, ScenarioDescription};
@@ -41,6 +41,9 @@ pub enum ManagerStatusMessage {
     /// Return the currently-selected scenario, if any
     Scenario(Option<UnitName>),
 
+    /// Return a list of tests in a scenario.
+    Tests(UnitName /* Scenario name */, Vec<UnitName> /* List of tests */),
+
     /// Greeting identifying the server.
     Hello(String /* Server identification name */),
 
@@ -56,6 +59,9 @@ pub enum ManagerControlMessageContents {
 
     /// Select a specific scenario.
     Scenario(UnitName /* Scenario name */),
+
+    /// Get a list of tests, either from the current scenario (None) or a specific scenario (Some)
+    GetTests(Option<UnitName>),
 
     /// An error message from a particular interface.
     Error(String /* Error message contents */),
@@ -317,6 +323,33 @@ impl UnitManager {
 
         let response = match *msg {
             ManagerControlMessageContents::Scenarios => vec![ManagerStatusMessage::Scenarios(self.scenarios.borrow().keys().map(|x| x.clone()).collect())],
+            ManagerControlMessageContents::GetTests(ref scenario_name) => {
+                match *scenario_name {
+                    None => if let Some(ref scenario_name) = *self.current_scenario.borrow() {
+                        let scenarios = self.scenarios.borrow();
+                        match scenarios.get(scenario_name) {
+                            Some(ref scenario) => vec![ManagerStatusMessage::Tests(scenario.id().clone(), scenario.test_sequence())],
+                            None => {
+                                self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unable to list tests, default scenario {} not found", scenario_name))));
+                                vec![]
+                            } 
+                        }
+                    } else {
+                        self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), "unable to list tests, and no default scenario found".to_owned())));
+                        vec![]
+                    },
+                    Some(ref scenario_name) => {
+                        let scenarios = self.scenarios.borrow();
+                        match scenarios.get(scenario_name) {
+                            Some(ref scenario) => vec![ManagerStatusMessage::Tests(scenario.id().clone(), scenario.test_sequence())],
+                            None => {
+                                self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unable to list tests, scenario {} not found", scenario_name))));
+                                vec![]
+                            },
+                        }
+                    }
+                }
+            }
             ManagerControlMessageContents::Scenario(ref scenario_name) => {
                 *self.current_scenario.borrow_mut() = if self.scenarios.borrow().get(scenario_name).is_some() {
                     Some(scenario_name.clone())
@@ -326,7 +359,7 @@ impl UnitManager {
                 vec![ManagerStatusMessage::Scenario(self.current_scenario.borrow().clone())]
             },
             ManagerControlMessageContents::Error(ref err) => {
-                //eprintln!("Error from interface: {}", err);
+                self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), err.clone())));
                 return;
             },
             ManagerControlMessageContents::InitialGreeting => {
@@ -347,7 +380,7 @@ impl UnitManager {
                 return;
             }
             ManagerControlMessageContents::Unimplemented(ref verb, ref remainder) => {
-                //eprintln!("Unimplemented verb: {} {}", verb, remainder);
+                self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unimplemented verb: {} (args: {})", verb, remainder))));
                 return;
             },
         };
