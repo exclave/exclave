@@ -7,19 +7,21 @@ pub struct Config {
     timeout: Duration,
     working_directory: PathBuf,
     paths: Vec<PathBuf>,
+    terminate_timeout: Duration,
 }
 
 impl Config {
     pub fn new() -> Config {
         Config {
             timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+            terminate_timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
             working_directory: Path::new(".").to_owned(),
             paths: vec![
                 Path::new("/usr/local/sbin").to_owned(),
                 Path::new("/usr/local/bin").to_owned(),
                 Path::new("/usr/sbin").to_owned(),
                 Path::new("/usr/bin").to_owned(),
-                Path::new("/sbin:/bin").to_owned()
+                Path::new("/sbin:/bin").to_owned(),
             ],
         }
     }
@@ -28,9 +30,14 @@ impl Config {
         &self.timeout
     }
 
+    pub fn terminate_timeout(&self) -> &Duration {
+        &self.terminate_timeout
+    }
+
     pub fn working_directory(&self) -> &PathBuf {
         &self.working_directory
     }
+
     pub fn paths(&self) -> &Vec<PathBuf> {
         &self.paths
     }
