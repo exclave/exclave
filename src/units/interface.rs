@@ -299,21 +299,21 @@ impl Interface {
             ManagerStatusMessage::Describe(class, field, name, value) => {
                 writeln!(process, "DESCRIBE {}", Self::cfti_escape(&format!("{} {} {} {}", class, field, name, value)))
             }
-             /*
-            BroadcastMessageContents::Log(l) => writeln!(
-                stdin,
+            ManagerStatusMessage::Log(l) => writeln!(
+                process,
                 "LOG {}\t{}\t{}\t{}\t{}\t{}",
-                msg.message_class,
-                msg.unit_id,
-                msg.unit_type,
-                msg.unix_time,
-                msg.unix_time_nsecs,
-                l.to_string()
+                l.kind().as_str(),
+                l.id().id(),
+                l.id().kind(),
+                l.secs(),
+                l.nsecs(),
+                l.message()
                     .replace("\\", "\\\\")
                     .replace("\t", "\\t")
                     .replace("\n", "\\n")
                     .replace("\r", "\\r")
             ),
+             /*
             //            BroadcastMessageContents::Hello(name) => writeln!(stdin,
             //                                                "HELLO {}", name),
             //            BroadcastMessageContents::Ping(val) => writeln!(stdin,

@@ -49,6 +49,9 @@ pub enum ManagerStatusMessage {
 
     /// Describes a Type of a particular Field on a given Unit
     Describe(UnitKind, FieldType, String /* UnitId */, String /* Value */),
+
+    /// A log message from one of the units, or the system itself.
+    Log(LogEntry),
 }
 
 /// Messages for Unit -> Library communication
@@ -348,6 +351,12 @@ impl UnitManager {
     pub fn process_message(&self, msg: &UnitEvent) {
         match msg {
             &UnitEvent::ManagerRequest(ref req) => self.manager_request(req),
+            &UnitEvent::Log(ref log) => {
+                for (_, interface) in self.interfaces.borrow().iter() {
+                    let log_status_msg = ManagerStatusMessage::Log(log.clone());
+                    interface.output_message(log_status_msg).expect("Unable to pass message to client");
+                }
+            },
             _ => (),
         }
     }

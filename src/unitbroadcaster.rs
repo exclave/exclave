@@ -1,7 +1,8 @@
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::fmt;
+use std::time;
 
 use unitmanager::ManagerControlMessage;
 use unit::{UnitKind, UnitName};
@@ -237,26 +238,75 @@ pub enum LogType {
     Info,
 }
 
+impl LogType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            &LogType::Error => "error",
+            &LogType::Info => "info",
+        }
+    }
+}
+
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub struct LogEntry {
     unit: UnitName,
     log_type: LogType,
     log_message: String,
+    /// Number of seconds since the epoch
+    pub unix_time: u64,
+
+    /// Number of nanoseconds since the epoch
+    pub unix_time_nsecs: u32,
 }
 
 impl LogEntry {
     pub fn new_error(id: UnitName, message: String) -> Self {
+        let elapsed = Self::elapsed();
         LogEntry {
             unit: id,
             log_type: LogType::Error,
             log_message: message,
+            unix_time: elapsed.as_secs(),
+            unix_time_nsecs: elapsed.subsec_nanos(),
         }
     }
+
     pub fn new_info(id: UnitName, message: String) -> Self {
+        let elapsed = Self::elapsed();
         LogEntry {
             unit: id,
             log_type: LogType::Info,
             log_message: message,
+            unix_time: elapsed.as_secs(),
+            unix_time_nsecs: elapsed.subsec_nanos(),
+        }
+    }
+
+    pub fn secs(&self) -> u64 {
+        self.unix_time
+    }
+
+    pub fn nsecs(&self) -> u32 {
+        self.unix_time_nsecs
+    }
+
+    pub fn message(&self) -> &String {
+        &self.log_message
+    }
+
+    pub fn kind(&self) -> &LogType {
+        &self.log_type
+    }
+
+    pub fn id(&self) -> &UnitName {
+        &self.unit
+    }
+
+    fn elapsed() -> time::Duration {
+        let now = time::SystemTime::now();
+        match now.duration_since(time::UNIX_EPOCH) {
+            Ok(d) => d,
+            Err(_) => time::Duration::new(0, 0),
         }
     }
 }
