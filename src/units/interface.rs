@@ -7,6 +7,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 use std::thread;
+use std::time::Duration;
 
 use config::Config;
 use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason,
@@ -170,16 +171,18 @@ pub struct Interface {
     working_directory: Option<PathBuf>,
     format: InterfaceFormat,
     process: RefCell<Option<Running>>,
+    terminate_timeout: Duration,
 }
 
 impl Interface {
-    pub fn new(desc: &InterfaceDescription, _: &UnitManager, _: &Config) -> Interface {
+    pub fn new(desc: &InterfaceDescription, _: &UnitManager, config: &Config) -> Interface {
         Interface {
             id: desc.id.clone(),
             exec_start: desc.exec_start.clone(),
             working_directory: desc.working_directory.clone(),
             format: desc.format,
             process: RefCell::new(None),
+            terminate_timeout: config.terminate_timeout().clone(),
         }
     }
 
@@ -229,7 +232,18 @@ impl Interface {
     }
 
     pub fn deactivate(&self) -> Result<(), UnitDeactivateError> {
-        Ok(())
+        if let Some(process) = self.process.borrow_mut().take() {
+            match process.terminate(Some(self.terminate_timeout)) {
+                Ok(retval) => match retval {
+                    0 => Ok(()),
+                    i => Err(UnitDeactivateError::NonZeroReturn(i)),
+                },
+                Err(e) => Err(UnitDeactivateError::RunningError(e)),
+            }
+        }
+        else {
+            Ok(())
+        }
     }
 
     /// Cause a MessageControlContents to be written out.
