@@ -258,6 +258,13 @@ impl Interface {
         unimplemented!();
     }
 
+    fn cfti_escape(msg: &String) -> String {
+        msg.replace("\\", "\\\\")
+            .replace("\t", "\\t")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+    }
+
     /// Write a UnitInterfaceMessage to a Text-formatted output.
     fn text_write(&self, msg: ManagerStatusMessage) -> Result<(), Error> {
         let mut process_opt = self.process.borrow_mut();
@@ -269,28 +276,28 @@ impl Interface {
         let process = process_opt.as_mut().unwrap();
 
         match msg {
-            ManagerStatusMessage::Jig(j) => writeln!(process, "JIG {}", j),
-            ManagerStatusMessage::Hello(id) => writeln!(process, "HELLO {}", id),
+            ManagerStatusMessage::Jig(j) => writeln!(process, "JIG {}", Self::cfti_escape(&format!("{}", j))),
+            ManagerStatusMessage::Hello(id) => writeln!(process, "HELLO {}", Self::cfti_escape(&format!("{}", id))),
             ManagerStatusMessage::Tests(scenario, tests) => {
-                write!(process, "TESTS {}", scenario)?;
+                write!(process, "TESTS {}", Self::cfti_escape(scenario.id()))?;
                 for test in &tests {
-                    write!(process, " {}", test)?;
+                    write!(process, " {}", Self::cfti_escape(test.id()))?;
                 }
                 writeln!(process, "")
             },
             ManagerStatusMessage::Scenario(name) => match name {
-                Some(s) => writeln!(process, "SCENARIO {}", s),
+                Some(s) => writeln!(process, "SCENARIO {}", Self::cfti_escape(s.id())),
                 None => writeln!(process, "SCENARIO"),
             },
             ManagerStatusMessage::Scenarios(list) => {
                 write!(process, "SCENARIOS")?;
-                for test_name in list {
-                    write!(process, " {}", test_name)?;
+                for scenario_name in list {
+                    write!(process, " {}", Self::cfti_escape(scenario_name.id()))?;
                 }
                 writeln!(process, "")
             },
             ManagerStatusMessage::Describe(class, field, name, value) => {
-                writeln!(process, "DESCRIBE {} {} {} {}", class, field, name, value)
+                writeln!(process, "DESCRIBE {}", Self::cfti_escape(&format!("{} {} {} {}", class, field, name, value)))
             }
              /*
             BroadcastMessageContents::Log(l) => writeln!(
@@ -307,15 +314,11 @@ impl Interface {
                     .replace("\n", "\\n")
                     .replace("\r", "\\r")
             ),
-            BroadcastMessageContents::Scenario(name) => writeln!(stdin, "SCENARIO {}", name),
             //            BroadcastMessageContents::Hello(name) => writeln!(stdin,
             //                                                "HELLO {}", name),
             //            BroadcastMessageContents::Ping(val) => writeln!(stdin,
             //                                                "PING {}", val),
             BroadcastMessageContents::Shutdown(reason) => writeln!(stdin, "EXIT {}", reason),
-            BroadcastMessageContents::Tests(scenario, tests) => {
-                writeln!(stdin, "TESTS {} {}", scenario, tests.join(" "))
-            }
             BroadcastMessageContents::Running(test) => writeln!(stdin, "RUNNING {}", test),
             BroadcastMessageContents::Skip(test, reason) => {
                 writeln!(stdin, "SKIP {} {}", test, reason)
@@ -403,11 +406,5 @@ impl Interface {
             }
         }
         control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::ChildExited)).expect("interface couldn't send exit message to controller");
-    }
-}
-
-impl Drop for Interface {
-    fn drop(&mut self) {
-        eprintln!("Dropping interface {}", self.id);
     }
 }
