@@ -70,7 +70,7 @@ pub enum ManagerControlMessageContents {
     InitialGreeting,
 
     /// Indicates the child object terminated unexpectedly.
-    UnexpectedExit,
+    ChildExited,
 
     /// Client sent an unimplemented message.
     Unimplemented(String /* verb */, String /* rest of line */),
@@ -375,7 +375,7 @@ impl UnitManager {
                 }
                 messages
             },
-            ManagerControlMessageContents::UnexpectedExit => {
+            ManagerControlMessageContents::ChildExited => {
                 self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_active_failed(sender_name, "Unit unexpectedly exited".to_owned())));
                 return;
             }
