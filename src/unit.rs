@@ -9,6 +9,7 @@ use std::io;
 
 use self::dependy::DepError;
 use self::runny::RunnyError;
+use self::runny::running::RunningError;
 use self::systemd_parser::errors::ParserError;
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone, PartialOrd, Ord)]
@@ -222,11 +223,23 @@ impl fmt::Display for UnitActivateError {
     }
 }
 
-pub enum UnitDeactivateError {}
+pub enum UnitDeactivateError {
+    NonZeroReturn(i32),
+    RunningError(RunningError),
+}
+
+impl From<RunningError> for UnitDeactivateError {
+    fn from(error: RunningError) -> Self {
+        UnitDeactivateError::RunningError(error)
+    }
+}
 
 impl fmt::Display for UnitDeactivateError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Unable to deactivate unit")
+        match self {
+            &UnitDeactivateError::NonZeroReturn(i) => write!(f, "Nonzero return: {}", i),
+            &UnitDeactivateError::RunningError(ref e) => write!(f, "Running error: {:?}", e),
+        }
     }
 }
 
