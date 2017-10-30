@@ -120,6 +120,13 @@ impl UnitName {
         }
         Ok(out_list)
     }
+
+    pub fn internal(s: &str) -> Self {
+        UnitName {
+            id: s.to_owned(),
+            kind: UnitKind::Internal,
+        }
+    }
 }
 
 impl fmt::Display for UnitName {
@@ -197,6 +204,10 @@ impl From<DepError<UnitName>> for UnitIncompatibleReason {
 }
 
 pub enum UnitActivateError {
+    /// We tried to activate a unit based on its ID, but it wasn't found.
+    UnitNotFound,
+
+    /// We tried to Exec, but an error occurred.
     ExecFailed(RunnyError),
 }
 
@@ -223,12 +234,19 @@ impl fmt::Display for UnitActivateError {
                     write!(f, "Unable to activate unit: Nix library error: {:?}", e)
                 }
             },
+            &UnitActivateError::UnitNotFound => write!(f, "Couldn't find unit by id"),
         }
     }
 }
 
 pub enum UnitDeactivateError {
+    /// We tried to activate a unit based on its ID, but it wasn't found.
+    UnitNotFound,
+
+    /// The unit returned something other than 0.
     NonZeroReturn(i32),
+
+    /// Runny reported an error of some sort.
     RunningError(RunningError),
 }
 
@@ -243,6 +261,7 @@ impl fmt::Display for UnitDeactivateError {
         match self {
             &UnitDeactivateError::NonZeroReturn(i) => write!(f, "Nonzero return: {}", i),
             &UnitDeactivateError::RunningError(ref e) => write!(f, "Running error: {:?}", e),
+            &UnitDeactivateError::UnitNotFound => write!(f, "Couldn't find unit by id"),
         }
     }
 }

@@ -1,5 +1,5 @@
-// This UnitLibrary contains all active, loaded modules, as well as the
-// "descriptions" that can be used to [re]load modules.
+// The UnitLibrary contains plans to load each valid Unit.  Units may
+// not actually be selected, e.g. if they aren't compatible.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -47,6 +47,60 @@ macro_rules! process_if {
                 }
             }
         }
+    }
+}
+
+//    select_and_activate!(dirty_interfaces, interface_descriptions, select_interface, activate_interface);
+macro_rules! select_units_for_activation {
+    ($slf:ident, $statuses:ident, $dirty:ident, $descriptions:ident, $select:ident) => {
+        {
+            let mut to_remove = vec![];
+            for (id, _) in $slf.$dirty.borrow().iter() {
+                if let Err(_) = match $statuses.get(id).unwrap() {
+                    &UnitStatus::LoadStarted(_) => {
+                        $slf.unit_manager.borrow_mut().$select($slf.$descriptions.borrow().get(id).unwrap())
+                    }
+                    &UnitStatus::UpdateStarted(_) => {
+                        $slf.unit_manager.borrow_mut().$select($slf.$descriptions.borrow().get(id).unwrap())
+                    }
+                    x => panic!("Unexpected unit status: {}", x),
+                } {
+                    to_remove.push(id.clone());
+                }
+            }
+            let mut dirty = $slf.$dirty.borrow_mut();
+            for id in to_remove {
+                dirty.remove(&id);
+            }
+        }
+    }
+}
+
+macro_rules! activate_units {
+    ($slf:ident, $dirty:ident) => {
+        {
+            for (id, _) in $slf.$dirty.borrow().iter() {
+                $slf.unit_manager.borrow_mut().activate(id);
+            }
+            $slf.$dirty.borrow_mut().clear();
+        }
+    }
+}
+
+macro_rules! select_units {
+    ($slf:ident, $statuses:ident, $dirty:ident, $descriptions:ident, $select:ident) => {
+        for (id, _) in $slf.$dirty.borrow().iter() {
+            match $statuses.get(id).unwrap() {
+                &UnitStatus::LoadStarted(_) => {
+                    $slf.unit_manager.borrow_mut().$select($slf.$descriptions.borrow().get(id).unwrap()).ok()
+                }
+                &UnitStatus::UpdateStarted(_) => {
+                    $slf.unit_manager.borrow_mut().$select($slf.$descriptions.borrow().get(id).unwrap()).ok()
+                }
+                x => panic!("Unexpected unit status: {}", x),
+            };
+        }
+        $slf.$dirty.borrow_mut().clear();
     }
 }
 
@@ -107,10 +161,12 @@ impl UnitLibrary {
     /// 2. Mark every Scenario that uses a dirty Test as dirty.
     ///    That way, scenario dependency graphs will be re-evaluated.
     /// 3. Delete any "dirty" objects that were Deleted.
-    /// 4. Load all Jigs that are valid.
-    /// 5. Load all Interfaces that are valid.
-    /// 6. Load all Tests that are compatible with this Jig.
-    /// 7. Load all Scenarios.
+    /// 4. Select all Jigs that are valid.
+    /// 5. Select all Interfaces that are valid.
+    /// 6. Select all Tests that are compatible with this Jig.
+    /// 7. Select all Scenarios.
+    /// 8. Activate all Jigs (only the last one will be 'active')
+    /// 9. Activate all Interfaces.
     pub fn rescan(&mut self) {
         self.broadcaster.broadcast(&UnitEvent::RescanStart);
         let mut statuses = self.unit_status.borrow_mut();
@@ -148,7 +204,7 @@ impl UnitLibrary {
             let scenarios_rc = unit_manager.get_scenarios();
             let scenarios = scenarios_rc.borrow();
             for (scenario_name, scenario) in scenarios.iter() {
-                if scenario.uses_test(test_name) {
+                if scenario.borrow().uses_test(test_name) {
                     self.dirty_scenarios
                         .borrow_mut()
                         .insert(scenario_name.clone(), ());
@@ -187,66 +243,22 @@ impl UnitLibrary {
         }
 
         // 4. Load all Jigs that are valid.
-        for (id, _) in self.dirty_jigs.borrow().iter() {
-            if let Ok(jig) = match statuses.get(id).unwrap() {
-                &UnitStatus::LoadStarted(_) => {
-                    self.unit_manager.borrow_mut().select_jig(self.jig_descriptions.borrow().get(id).unwrap())
-                }
-                &UnitStatus::UpdateStarted(_) => {
-                    self.unit_manager.borrow_mut().select_jig(self.jig_descriptions.borrow().get(id).unwrap())
-                }
-                x => panic!("Unexpected jig unit status: {}", x),
-            } {
-                self.unit_manager.borrow_mut().activate_jig(jig);
-            }
-        }
-        self.dirty_jigs.borrow_mut().clear();
+        select_units_for_activation!(self, statuses, dirty_jigs, jig_descriptions, select_jig);
 
         // 5. Load all Interfaces that are compatible with this Jig.
-        for (id, _) in self.dirty_interfaces.borrow().iter() {
-        
-            if let Ok(interface) = match statuses.get(id).unwrap() {
-                &UnitStatus::LoadStarted(_) => {
-                    self.unit_manager.borrow_mut().select_interface(self.interface_descriptions.borrow().get(id).unwrap())
-                }
-                &UnitStatus::UpdateStarted(_) => {
-                    eprintln!("Updating interface in manager: {}", id);
-                    self.unit_manager.borrow_mut().select_interface(self.interface_descriptions.borrow().get(id).unwrap())
-                }
-                x => panic!("Unexpected interface unit status: {}", x),
-            } {
-                self.unit_manager.borrow_mut().activate_interface(interface);
-            }
-        }
-        self.dirty_interfaces.borrow_mut().clear();
+        select_units_for_activation!(self, statuses, dirty_interfaces, interface_descriptions, select_interface);
 
         // 6. Load all Tests that are compatible with this Jig.
-        for (id, _) in self.dirty_tests.borrow().iter() {
-            match statuses.get(id).unwrap() {
-                &UnitStatus::LoadStarted(_) => {
-                    self.unit_manager.borrow_mut().load_test(self.test_descriptions.borrow().get(id).expect("Test status is present, but test is not in the description table"))
-                }
-                &UnitStatus::UpdateStarted(_) => {
-                    self.unit_manager.borrow_mut().load_test(self.test_descriptions.borrow().get(id).expect("Test status is present, but test is not in the description table"))
-                }
-                x => panic!("Unexpected test unit status: {}", x),
-            }
-        }
-        self.dirty_tests.borrow_mut().clear();
+        select_units!(self, statuses, dirty_tests, test_descriptions, select_test);
 
         // 7. Load all Scenarios that are compatible with this Jig.
-        for (id, _) in self.dirty_scenarios.borrow().iter() {
-            match statuses.get(id).unwrap() {
-                &UnitStatus::LoadStarted(_) => {
-                    self.unit_manager.borrow_mut().load_scenario(self.scenario_descriptions.borrow().get(id).unwrap())
-                }
-                &UnitStatus::UpdateStarted(_) => {
-                    self.unit_manager.borrow_mut().load_scenario(self.scenario_descriptions.borrow().get(id).unwrap())
-                }
-                x => panic!("Unexpected scenario unit status: {}", x),
-            }
-        }
-        self.dirty_scenarios.borrow_mut().clear();
+        select_units!(self, statuses, dirty_scenarios, scenario_descriptions, select_scenario);
+
+        // 8. Activate all jigs that were just loaded.
+        activate_units!(self, dirty_jigs);
+
+        // 9. Activate all interfaces that were just loaded.
+        activate_units!(self, dirty_interfaces);
 
         self.broadcaster.broadcast(&UnitEvent::RescanFinish);
     }

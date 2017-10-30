@@ -368,10 +368,10 @@ impl Interface {
                 ,
                 "tests" => {
                     if words.is_empty() {
-                        ManagerControlMessageContents::GetTests(None)
+                        ManagerControlMessageContents::Tests(None)
                     } else {
                         match UnitName::from_str(words[0].to_lowercase().as_str(), "test") {
-                            Ok(scenario_name) => ManagerControlMessageContents::GetTests(Some(scenario_name)),
+                            Ok(scenario_name) => ManagerControlMessageContents::Tests(Some(scenario_name)),
                             Err(e) => ManagerControlMessageContents::Error(format!("Invalid test name specified: {}", e)),
                         }
                     }

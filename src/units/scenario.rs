@@ -1,12 +1,13 @@
 extern crate dependy;
 extern crate systemd_parser;
 
-use std::path::Path;
-use std::time::Duration;
-use std::io::Read;
-use std::fs::File;
-use std::sync::{Arc, Mutex};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
+use std::rc::Rc;
+use std::time::Duration;
 
 use self::systemd_parser::items::DirectiveEntry;
 use self::dependy::{Dependy, Dependency};
@@ -211,7 +212,7 @@ impl ScenarioDescription {
                     let assumption_dep = AssumptionDependency::new(test_name.clone());
                     graph.add_dependency(&assumption_dep);
                 } else {
-                    graph.add_dependency(&*test.lock().unwrap());
+                    graph.add_dependency(&*test.borrow());
                 }
             }
         }
@@ -239,8 +240,8 @@ pub struct Scenario {
     id: UnitName,
     name: String,
     description: String,
-    test_sequence: Vec<Arc<Mutex<Test>>>,
-    tests: HashMap<UnitName, Arc<Mutex<Test>>>,
+    test_sequence: Vec<Rc<RefCell<Test>>>,
+    tests: HashMap<UnitName, Rc<RefCell<Test>>>,
 }
 
 impl Scenario {
@@ -253,7 +254,7 @@ impl Scenario {
         let mut test_sequence = vec![];
 
         for test_name in test_order {
-            let test = manager.get_test(&test_name).expect("Unable to check out requested test from library");
+            let test = manager.get_test_named(&test_name).expect("Unable to check out requested test from library");
             test_sequence.push(test.clone());
             tests.insert(test_name, test);
         }
@@ -270,12 +271,12 @@ impl Scenario {
     pub fn test_sequence(&self) -> Vec<UnitName> {
         let mut test_sequence = vec![];
         for test in &self.test_sequence {
-            test_sequence.push(test.lock().unwrap().id().clone());
+            test_sequence.push(test.borrow().id().clone());
         }
         test_sequence
     }
 
-    pub fn tests(&self) -> &HashMap<UnitName, Arc<Mutex<Test>>> {
+    pub fn tests(&self) -> &HashMap<UnitName, Rc<RefCell<Test>>> {
         &self.tests
     }
 

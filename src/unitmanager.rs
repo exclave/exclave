@@ -1,3 +1,5 @@
+// The UnitManager contains all units that are Selected.  This includes
+// units that are Active.
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
@@ -7,12 +9,46 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use config::Config;
-use unit::{UnitName, UnitKind};
-use unitbroadcaster::{UnitBroadcaster, UnitEvent, UnitStatusEvent, LogEntry};
+use unit::{UnitName, UnitKind, UnitActivateError, UnitDeactivateError};
+use unitbroadcaster::{UnitBroadcaster, UnitEvent, UnitStatusEvent, UnitStatus, LogEntry};
 use units::interface::{Interface, InterfaceDescription};
 use units::jig::{Jig, JigDescription};
 use units::scenario::{Scenario, ScenarioDescription};
 use units::test::{Test, TestDescription};
+
+macro_rules! select {
+    ($slf:ident, $dest:ident, $desc:ident) => {
+        {
+            // If the item exists in the array already, then it is active and will be deactivated first.
+            if $slf.$dest.borrow_mut().contains_key($desc.id()) {
+                // Deactivate it before unloading
+                $slf.deactivate($desc.id(), "reloading");
+                $slf.deselect($desc.id());
+            };
+            // "Select" the Interface, which means we can activate it later on.
+            match $desc.select($slf, &*$slf.cfg.lock().unwrap()) {
+                Ok(o) => {
+                    let new_item = Rc::new(RefCell::new(o));
+                    // Announce the fact that the interface was selected successfully.
+                    $slf.bc
+                        .broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected($desc.id())));
+
+                    $slf.$dest.borrow_mut().insert($desc.id().clone(), new_item.clone());
+                    Ok($desc.id().clone())
+                }
+                Err(e) => {
+                    $slf.bc.broadcast(
+                        &UnitEvent::Status(UnitStatusEvent::new_unit_incompatible(
+                            $desc.id(),
+                            format!("{}", e),
+                        )),
+                    );
+                    Err(())
+                }
+            }
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum FieldType {
@@ -67,7 +103,7 @@ pub enum ManagerControlMessageContents {
     Scenario(UnitName /* Scenario name */),
 
     /// Get a list of tests, either from the current scenario (None) or a specific scenario (Some)
-    GetTests(Option<UnitName>),
+    Tests(Option<UnitName>),
 
     /// An error message from a particular interface.
     Error(String /* Error message contents */),
@@ -104,26 +140,26 @@ pub struct UnitManager {
     cfg: Arc<Mutex<Config>>,
     bc: UnitBroadcaster,
 
-    /// Loaded Interfaces, available for checkout.
-    interfaces: RefCell<HashMap<UnitName, Interface>>,
+    /// Selected Interfaces, available for activation.
+    interfaces: RefCell<HashMap<UnitName, Rc<RefCell<Interface>>>>,
 
-    /// Loaded Jigs, available for checkout.
-    jigs: RefCell<HashMap<UnitName, Arc<Mutex<Jig>>>>,
+    /// Selected Jigs, available for activation.
+    jigs: RefCell<HashMap<UnitName, Rc<RefCell<Jig>>>>,
 
-    /// Loaded Scenarios, available for checkout.
-    scenarios: Rc<RefCell<HashMap<UnitName, Scenario>>>,
+    /// Selected Scenarios, available for activation.
+    scenarios: Rc<RefCell<HashMap<UnitName, Rc<RefCell<Scenario>>>>>,
 
-    /// Loaded Tests, available for checkout.
-    tests: Rc<RefCell<HashMap<UnitName, Arc<Mutex<Test>>>>>,
+    /// Selected Tests, available for activation.
+    tests: Rc<RefCell<HashMap<UnitName, Rc<RefCell<Test>>>>>,
 
     /// Prototypical message sender that will be cloned and passed to each new unit.
     control_sender: Sender<ManagerControlMessage>,
 
-    /// The name of the currently-selected Scenario, if any
-    current_scenario: Rc<RefCell<Option<UnitName>>>,
+    /// The currently-selected Scenario, if any
+    current_scenario: Rc<RefCell<Option<Rc<RefCell<Scenario>>>>>,
 
-    /// The name of the currently-selected Jig, if any
-    current_jig: Rc<RefCell<Option<UnitName>>>,
+    /// The currently-selected Jig, if any
+    current_jig: Rc<RefCell<Option<Rc<RefCell<Jig>>>>>,
 }
 
 impl UnitManager {
@@ -141,6 +177,7 @@ impl UnitManager {
             jigs: RefCell::new(HashMap::new()),
             scenarios: Rc::new(RefCell::new(HashMap::new())),
             tests: Rc::new(RefCell::new(HashMap::new())),
+
             current_scenario: Rc::new(RefCell::new(None)),
             current_jig: Rc::new(RefCell::new(None)),
 
@@ -159,160 +196,198 @@ impl UnitManager {
         self.control_sender.clone()
     }
 
-    pub fn select_interface(&self, description: &InterfaceDescription) -> Result<Interface, ()> {
-        // If the interface exists in the array already, then it is active and will be deactivated first.
-        if let Some(old_interface) = self.interfaces.borrow_mut().remove(description.id()) {
-            match old_interface.deactivate() {
-                Ok(_) =>
-            self.bc.broadcast(
-                    &UnitEvent::Status(UnitStatusEvent::new_deactivate_success(description.id(), "Reloading interface".to_owned()))),
-                Err(e) =>
-            self.bc.broadcast(
-                    &UnitEvent::Status(UnitStatusEvent::new_deactivate_failure(description.id(), format!("Unable to deactivate: {}", e)))),
-            }
-
-            // After deactivating the old interface, deselect it.
-            self.bc
-                .broadcast(&UnitEvent::Status(UnitStatusEvent::new_deselected(description.id())));
-        }
-
-        // "Select" the Interface, which means we can activate it later on.
-        let new_interface = match description.select(self, &*self.cfg.lock().unwrap()) {
-            Ok(o) => o,
-            Err(e) => {
-                self.bc.broadcast(
-                    &UnitEvent::Status(UnitStatusEvent::new_unit_incompatible(
-                        description.id(),
-                        format!("{}", e),
-                    )),
-                );
-                return Err(());
-            }
-        };
-
-        // Announce the fact that the interface was selected successfully.
-        self.bc
-            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected(description.id())));
-        Ok(new_interface)
+    pub fn select_interface(&self, description: &InterfaceDescription) -> Result<UnitName, ()> {
+        select!(self, interfaces, description)
     }
 
-    pub fn activate_interface(&self, interface: Interface) {
-        // Activate the interface, which actually starts it up.
-        match interface.activate(self, &*self.cfg.lock().unwrap()) {
-            Err(e) => {
-            self.bc
-            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active_failed(interface.id(), format!("{}", e))));
-            return;
-            },
-            Ok(i) => i,
+    pub fn select_test(&self, desceription: &TestDescription) -> Result<UnitName, ()> {
+        select!(self, tests, desceription)
+    }
+
+    pub fn select_jig(&self, desceription: &JigDescription) -> Result<UnitName, ()> {
+        select!(self, jigs, desceription)
+    }
+
+    pub fn select_scenario(&self, desceription: &ScenarioDescription) -> Result<UnitName, ()> {
+        select!(self, scenarios, desceription)
+    }
+
+    pub fn deselect(&self, id: &UnitName) {
+        // Remove the item from its associated Rc array.
+        // Note that because these are Rcs, they may live on for a little while
+        // longer as references in other objects.
+        let result = match id.kind() {
+            &UnitKind::Interface => self.interfaces.borrow_mut().remove(id).is_some(),
+            &UnitKind::Test => self.tests.borrow_mut().remove(id).is_some(),
+            &UnitKind::Scenario => self.scenarios.borrow_mut().remove(id).is_some(),
+            &UnitKind::Jig => self.jigs.borrow_mut().remove(id).is_some(),
+            &UnitKind::Internal => false,
+        };
+
+        if result {
+            // After deactivating the old item, deselect it.
+            self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_deselected(id)));
+        }
+    }
+
+    pub fn activate(&self, id: &UnitName) {
+        let result = match *id.kind() {
+            UnitKind::Interface => self.activate_interface(id),
+            UnitKind::Jig => self.activate_jig(id),
+            UnitKind::Scenario => self.activate_scenario(id),
+            UnitKind::Test => self.activate_test(id),
+            UnitKind::Internal => Ok(()),
         };
 
         // Announce that the interface was successfully started.
-        self.bc
-            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(interface.id())));
-
-        self.interfaces
-            .borrow_mut()
-            .insert(interface.id().clone(),
-                    interface);
+        match result {
+            Ok(_) => self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(id))),
+            Err(e) =>
+               self.bc.broadcast(
+                    &UnitEvent::Status(UnitStatusEvent::new_active_failed(id, format!("unable to deactivate: {}", e)))),
+        }
     }
 
-
-    pub fn select_jig(&self, description: &JigDescription) -> Result<Jig, ()> {
-        self.jigs.borrow_mut().remove(description.id());
-
-        // "Select" the Jig, which means we can activate it later on.
-        let new_jig = match description.select(self, &*self.cfg.lock().unwrap()) {
-            Ok(o) => o,
-            Err(e) => {
-                self.bc.broadcast(
-                    &UnitEvent::Status(UnitStatusEvent::new_unit_incompatible(
-                        description.id(),
-                        format!("{}", e),
-                    )),
-                );
-                return Err(());
-            }
+    pub fn deactivate(&self, id: &UnitName, reason: &str) {
+        let result = match *id.kind() {
+            UnitKind::Interface => self.deactivate_interface(id),
+            UnitKind::Jig => self.deactivate_jig(id),
+            UnitKind::Scenario => self.deactivate_scenario(id),
+            UnitKind::Test => self.deactivate_test(id),
+            UnitKind::Internal => Ok(()),
         };
-
-        self.bc
-            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected(description.id())));
-        Ok(new_jig)
+        match result {
+            Ok(_) => self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_deactivate_success(id, reason.to_owned()))),
+            Err(e) =>
+                self.bc.broadcast(
+                        &UnitEvent::Status(UnitStatusEvent::new_deactivate_failure(id, format!("unable to deactivate: {}", e)))),
+        }
     }
 
-    /// Announce that the jig was successfully started.
-    /// Only do so if there aren't any other valid, active jigs.
-    pub fn activate_jig(&self, jig: Jig) {
-        let mut current_jig = self.current_jig.borrow_mut();
-        if let &Some(ref current_jig_name) = &*current_jig {
-            // Don't continue if the jig is already loaded.
-            if self.jigs.borrow().get(&current_jig_name).is_some() {
-                return;
-            }
-            // Don't re-load the current jig.
-            if current_jig_name == jig.id() {
-                return;
+    pub fn deactivate_interface(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
+        let interfaces = self.interfaces.borrow();
+        match interfaces.get(id) {
+            None => return Err(UnitDeactivateError::UnitNotFound),
+            Some(interface) => interface.borrow_mut().deactivate(),
+        }
+    }
+
+    pub fn deactivate_test(&self, _id: &UnitName) -> Result<(), UnitDeactivateError> {
+        unimplemented!();
+    }
+
+    pub fn deactivate_scenario(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
+        let mut current_scenario_opt = self.current_scenario.borrow_mut();
+
+        // If the specified jig isn't the current jig, then there's nothing to do.
+        match *current_scenario_opt {
+            None => return Ok(()),
+            Some(ref s) => {
+                let current_scenario = s.borrow();
+                if current_scenario.id() != id {
+                    return Ok(());
+                }
             }
         }
-        *current_jig = Some(jig.id().clone());
-        *self.current_scenario.borrow_mut() = jig.default_scenario().clone();
 
-        self.bc
-            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(jig.id())));
-
-        self.jigs
-            .borrow_mut()
-            .insert(jig.id().clone(), Arc::new(Mutex::new(jig)));
+        let scenario_rc = current_scenario_opt.take().unwrap();
+        scenario_rc.borrow_mut().deactivate()?;
+        Ok(())
     }
 
-    pub fn load_test(&self, description: &TestDescription) {
-        self.tests.borrow_mut().remove(description.id());
+    pub fn deactivate_jig(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
+        let mut current_jig_opt = self.current_jig.borrow_mut();
 
-        // "Select" the Jig, which means we can activate it later on.
-        let new_test = match description.select(self, &*self.cfg.lock().unwrap()) {
-            Ok(o) => o,
-            Err(e) => {
-                self.bc.broadcast(
-                    &UnitEvent::Status(UnitStatusEvent::new_unit_incompatible(
-                        description.id(),
-                        format!("{}", e),
-                    )),
-                );
-                return;
+        // If the specified jig isn't the current jig, then there's nothing to do.
+        match *current_jig_opt {
+            None => return Err(UnitDeactivateError::UnitNotFound),
+            Some(ref s) => {
+                let current_jig = s.borrow();
+                if current_jig.id() != id {
+                    return Err(UnitDeactivateError::UnitNotFound);
+                }
             }
+        }
+
+        let jig_rc = current_jig_opt.take().unwrap();
+        jig_rc.borrow_mut().deactivate()?;
+
+        // Also deselect the current scenario, if it's not empty.
+        let scenario_id_to_deactivate = match *self.current_scenario.borrow() {
+            None => None,
+            Some(ref scenario_rc) => Some(scenario_rc.borrow().id().clone()),
+        };
+        if let Some(ref scenario_id) = scenario_id_to_deactivate {
+            self.deactivate(scenario_id, "jig is deactivating");
+        }
+        Ok(())
+    }
+
+    pub fn activate_interface(&self, id: &UnitName) -> Result<(), UnitActivateError> {
+        let interface = match self.interfaces.borrow().get(id) {
+            Some(i) => i.clone(),
+            None => return Err(UnitActivateError::UnitNotFound),
         };
 
-        self.tests
-            .borrow_mut()
-            .insert(description.id().clone(), Arc::new(Mutex::new(new_test)));
-        self.bc
-            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected(description.id())));
+        // Activate the interface, which actually starts it up.
+        interface.borrow_mut().activate(self, &*self.cfg.lock().unwrap())?;
+
+        Ok(())
     }
 
-    pub fn load_scenario(&self, description: &ScenarioDescription) {
-        self.scenarios.borrow_mut().remove(description.id());
-
-        // "Select" the Jig, which means we can activate it later on.
-        let new_scenario = match description.select(self, &*self.cfg.lock().unwrap()) {
-            Ok(o) => o,
-            Err(e) => {
-                self.bc.broadcast(
-                    &UnitEvent::Status(UnitStatusEvent::new_unit_incompatible(
-                        description.id(),
-                        format!("{}", e),
-                    )),
-                );
-                return;
-            }
+    /// Set the new jig as "Active".
+    /// If there is already an "Active" jig, then deactivate it.
+    /// Only do so if there aren't any other valid, active jigs.
+    pub fn activate_jig(&self, id: &UnitName) -> Result<(), UnitActivateError> {
+        let new_jig = match self.jigs.borrow().get(id) {
+            Some(s) => s.clone(),
+            None => return Err(UnitActivateError::UnitNotFound),
         };
 
-        self.scenarios
-            .borrow_mut()
-            .insert(description.id().clone(), new_scenario);
+        // If there is an existing current jig, deactivate it.
+        // There Can Only Be One.
+        if let Some(ref old_jig) = self.current_jig.borrow_mut().take() {
+            self.deactivate(old_jig.borrow().id(), "switching to a different jig");
+        }
+
+        // Activate this jig.
+        new_jig.borrow_mut().activate()?;
+        *self.current_jig.borrow_mut() = Some(new_jig.clone());
         self.bc
-            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected(description.id())));
+            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(id)));
+
+        // If there is a default scenario, activate that too.
+        if let Some(new_scenario_id) = new_jig.borrow().default_scenario().clone() {
+            self.activate_scenario(&new_scenario_id)?;
+        }
+
+        Ok(())
     }
-    
+
+    pub fn activate_scenario(&self, id: &UnitName) -> Result<(), UnitActivateError> {
+        let new_scenario = match self.scenarios.borrow().get(id) {
+            Some(s) => s.clone(),
+            None => return Err(UnitActivateError::UnitNotFound),
+        };
+
+        // If there is an existing current scenario, deactivate it.
+        // There Can Only Be One.
+        if let Some(ref old_scenario) = self.current_scenario.borrow_mut().take() {
+            self.deactivate(old_scenario.borrow().id(), "switching to a new scenario");
+        }
+        
+        // Activate this scenario.
+        new_scenario.borrow_mut().activate()?;
+        *self.current_scenario.borrow_mut() = Some(new_scenario.clone());
+        self.bc
+            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(id)));
+        Ok(())
+    }
+
+    pub fn activate_test(&self, _id: &UnitName) -> Result<(), UnitActivateError> {
+        unimplemented!();
+    }
+
     pub fn remove_interface(&self, id: &UnitName) {
         self.interfaces.borrow_mut().remove(id);
     }
@@ -329,33 +404,68 @@ impl UnitManager {
         self.scenarios.borrow_mut().remove(id);
     }
 
-    pub fn jig_is_loaded(&self, id: &UnitName) -> bool {
-        self.jigs.borrow().get(id).is_some()
+/*
+    pub fn get_jig_named(&self, id: &UnitName) -> Option<Rc<RefCell<Jig>>> {
+        match self.jigs.borrow().get(id) {
+            None => None,
+            Some(ref s) => Some(*s.clone())
+        }
     }
 
-    pub fn get_test(&self, id: &UnitName) -> Option<Arc<Mutex<Test>>> {
+    pub fn get_interface_named(&self, id: &UnitName) -> Option<Rc<RefCell<Interface>>> {
+        match self.interfaces.borrow().get(id) {
+            None => None,
+            Some(ref s) => Some(*s.clone())
+        }
+    }
+*/
+    pub fn get_scenario_named(&self, id: &UnitName) -> Option<Rc<RefCell<Scenario>>> {
+        match self.scenarios.borrow().get(id) {
+            None => None,
+            Some(scenario) => Some(scenario.clone())
+        }
+    }
+
+    pub fn get_test_named(&self, id: &UnitName) -> Option<Rc<RefCell<Test>>> {
         match self.tests.borrow().get(id) {
             None => None,
             Some(test) => Some(test.clone()),
         }
     }
 
-    pub fn get_tests(&self) -> Rc<RefCell<HashMap<UnitName, Arc<Mutex<Test>>>>> {
+    pub fn get_tests(&self) -> Rc<RefCell<HashMap<UnitName, Rc<RefCell<Test>>>>> {
         self.tests.clone()
     }
 
-    pub fn get_scenarios(&self) -> Rc<RefCell<HashMap<UnitName, Scenario>>> {
+    pub fn get_scenarios(&self) -> Rc<RefCell<HashMap<UnitName, Rc<RefCell<Scenario>>>>> {
         self.scenarios.clone()
+    }
+
+     pub fn jig_is_loaded(&self, id: &UnitName) -> bool {
+        self.jigs.borrow().get(id).is_some()
     }
 
     pub fn process_message(&self, msg: &UnitEvent) {
         match msg {
             &UnitEvent::ManagerRequest(ref req) => self.manager_request(req),
+            &UnitEvent::Status(ref stat) => self.status_message(stat),
             &UnitEvent::Log(ref log) => {
                 for (_, interface) in self.interfaces.borrow().iter() {
                     let log_status_msg = ManagerStatusMessage::Log(log.clone());
-                    interface.output_message(log_status_msg).expect("Unable to pass message to client");
+                    interface.borrow().output_message(log_status_msg).expect("Unable to pass message to client");
                 }
+            },
+            _ => (),
+        }
+    }
+
+    fn status_message(&self, msg: &UnitStatusEvent) {
+        let &UnitStatusEvent {ref name, ref status} = msg;
+        match status {
+            &UnitStatus::Active => match name.kind() {
+                &UnitKind::Jig => self.broadcast_jig_named(name),
+                &UnitKind::Scenario => self.broadcast_scenario_named(name),
+                _ => (),
             },
             _ => (),
         }
@@ -365,13 +475,12 @@ impl UnitManager {
         let &ManagerControlMessage {sender: ref sender_name, contents: ref msg} = msg;
 
         match *msg {
-            ManagerControlMessageContents::Scenarios => self.send_scenarios(sender_name),
-            ManagerControlMessageContents::GetTests(ref scenario_name) => self.send_tests(sender_name, scenario_name),
+            ManagerControlMessageContents::Scenarios => self.send_scenarios_to(sender_name),
+            ManagerControlMessageContents::Tests(ref scenario_name) => self.send_tests_to(sender_name, scenario_name),
             ManagerControlMessageContents::Log(ref txt) => self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(sender_name.clone(), txt.clone()))),
             ManagerControlMessageContents::Scenario(ref new_scenario_name) => {
-                if self.scenarios.borrow().get(new_scenario_name).is_some() {
-                    *self.current_scenario.borrow_mut() = Some(new_scenario_name.clone());
-                    self.send_scenario(sender_name, &Some(new_scenario_name.clone()));
+                if self.get_scenario_named(new_scenario_name).is_some() {
+                    self.activate(new_scenario_name);
                 } else {
                     self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unable to find scenario {}", new_scenario_name))));
                 }
@@ -379,13 +488,16 @@ impl UnitManager {
             ManagerControlMessageContents::Error(ref err) => {
                 self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), err.clone())));
             },
-            ManagerControlMessageContents::Jig => self.send_jig(sender_name),
+            ManagerControlMessageContents::Jig => self.send_jig_to(sender_name),
             ManagerControlMessageContents::InitialGreeting => {
                 // Send some initial information to the client.
-                self.send_hello(sender_name);
-                self.send_jig(sender_name);
-                self.send_scenarios(sender_name);
-                self.send_scenario(sender_name, &*self.current_scenario.borrow());
+                self.send_hello_to(sender_name);
+                self.send_jig_to(sender_name);
+                self.send_scenarios_to(sender_name);
+                // If there is a scenario selected, send that too.
+                if let Some(ref sc) = *self.current_scenario.borrow() {
+                    self.send_scenario_to(sender_name, &sc.borrow().id().clone());
+                }
             },
             ManagerControlMessageContents::ChildExited => {
                 self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_active_failed(sender_name, "Unit unexpectedly exited".to_owned())));
@@ -396,17 +508,15 @@ impl UnitManager {
         }
     }
 
-    pub fn send_hello(&self, sender_name: &UnitName) {
-        self.send_responses(sender_name, vec![ManagerStatusMessage::Hello("Jig/20 1.0".to_owned())]);
+    pub fn send_hello_to(&self, sender_name: &UnitName) {
+        self.send_messages_to(sender_name, vec![ManagerStatusMessage::Hello("Jig/20 1.0".to_owned())]);
     }
 
-    pub fn send_jig(&self, sender_name: &UnitName) {
+    pub fn send_jig_to(&self, sender_name: &UnitName) {
         let messages = match *self.current_jig.borrow() {
             None => vec![ManagerStatusMessage::Jig(UnitName::from_str("", "jig").unwrap())],
-            Some(ref jig_name) => {
-                let jigs = self.jigs.borrow();
-                // Unwrap, because the jig most definitely should exist.
-                let jig = jigs.get(jig_name).unwrap().lock().unwrap();
+            Some(ref jig_rc) => {
+                let jig = jig_rc.borrow();
                 vec![
                     ManagerStatusMessage::Jig(jig.id().clone()),
                     ManagerStatusMessage::Describe(jig.id().kind().clone(), FieldType::Name, jig.id().id().clone(), jig.name().clone()),
@@ -414,73 +524,113 @@ impl UnitManager {
                 ]
             }
         };
-        self.send_responses(sender_name, messages);
+        self.send_messages_to(sender_name, messages);
     }
 
-    pub fn send_scenarios(&self, sender_name: &UnitName) {
+    /// Send all available scenarios to the specified endpoint.
+    pub fn send_scenarios_to(&self, sender_name: &UnitName) {
         let mut messages = vec![ManagerStatusMessage::Scenarios(self.scenarios.borrow().keys().map(|x| x.clone()).collect())];
         for (scenario_id, scenario) in self.scenarios.borrow().iter() {
-            messages.push(ManagerStatusMessage::Describe(scenario_id.kind().clone(), FieldType::Name, scenario_id.id().clone(), scenario.name().clone()));
-            messages.push(ManagerStatusMessage::Describe(scenario_id.kind().clone(), FieldType::Description, scenario_id.id().clone(), scenario.description().clone()));
+            messages.push(ManagerStatusMessage::Describe(scenario_id.kind().clone(), FieldType::Name, scenario_id.id().clone(), scenario.borrow().name().clone()));
+            messages.push(ManagerStatusMessage::Describe(scenario_id.kind().clone(), FieldType::Description, scenario_id.id().clone(), scenario.borrow().description().clone()));
         }
-        self.send_responses(sender_name, messages);
+        self.send_messages_to(sender_name, messages);
     }
 
-    pub fn send_scenario(&self, sender_name: &UnitName, scenario_name_opt: &Option<UnitName>) {
-        let messages = if let &Some(ref scenario_name) = scenario_name_opt {
-            if let Some(scenario) = self.scenarios.borrow().get(scenario_name) {
+    pub fn send_scenario_to(&self, sender_name: &UnitName, scenario_name: &UnitName) {
+        let messages = match self.scenarios.borrow().get(scenario_name) {
+            None => vec![ManagerStatusMessage::Scenario(None)],
+            Some(scenario_rc) => {
+                let scenario = scenario_rc.borrow();
                 let mut messages = vec![ManagerStatusMessage::Scenario(Some(scenario_name.clone()))];
-                for (test_id, test_mtx) in scenario.tests() {
-                    let test = test_mtx.lock().unwrap();
+                for (test_id, test_rc) in scenario.tests() {
+                    let test = test_rc.borrow();
                     messages.push(ManagerStatusMessage::Describe(test_id.kind().clone(), FieldType::Name, test_id.id().clone(), test.name().clone()));
                     messages.push(ManagerStatusMessage::Describe(test_id.kind().clone(), FieldType::Description, test_id.id().clone(), test.description().clone()));
                 }
                 messages.push(ManagerStatusMessage::Tests(scenario.id().clone(), scenario.test_sequence()));
                 messages
-            } else {
-                vec![ManagerStatusMessage::Scenario(None)]
             }
-        } else {
-            vec![ManagerStatusMessage::Scenario(None)]
         };
-        self.send_responses(sender_name, messages);
+        self.send_messages_to(sender_name, messages);
     }
 
-    pub fn send_tests(&self, sender_name: &UnitName, scenario_name_opt: &Option<UnitName>) {
-        match *scenario_name_opt {
-            None => if let Some(ref scenario_name) = *self.current_scenario.borrow() {
-                let scenarios = self.scenarios.borrow();
-                match scenarios.get(scenario_name) {
-                    Some(ref scenario) => self.send_responses(sender_name, vec![ManagerStatusMessage::Tests(scenario.id().clone(), scenario.test_sequence())]),
-                    None => {
-                        self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unable to list tests, default scenario {} not found", scenario_name))));
-                    } 
+    /// Send a list of tests to the specified recipient.
+    /// If no scenario name is specified, send the current scenario.
+    pub fn send_tests_to(&self, sender_name: &UnitName, scenario_name_opt: &Option<UnitName>) {
+        let scenario_id = match *scenario_name_opt {
+            Some(ref n) => n.clone(),
+            None => match *self.current_scenario.borrow() {
+                Some(ref cs) => cs.borrow().id().clone(),
+                None => {
+                    self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), "unable to list tests, no scenario specified and no scenario selected".to_owned())));
+                    return;
                 }
-            } else {
-                self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), "unable to list tests, and no default scenario found".to_owned())));
-            },
-            Some(ref scenario_name) => {
-                let scenarios = self.scenarios.borrow();
-                match scenarios.get(scenario_name) {
-                    Some(ref scenario) => self.send_responses(sender_name, vec![ManagerStatusMessage::Tests(scenario.id().clone(), scenario.test_sequence())]),
-                    None => {
-                        self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unable to list tests, scenario {} not found", scenario_name))));
-                    },
-                }
+            }
+        };
+        let scenarios = self.scenarios.borrow();
+        let scenario_rc_opt = scenarios.get(&scenario_id);
+        match scenario_rc_opt {
+            None => self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unable to list tests, scenario {} not found", scenario_id)))),
+            Some(ref sc_ref) => {
+                let scenario = sc_ref.borrow();
+                self.send_messages_to(sender_name, vec![ManagerStatusMessage::Tests(scenario.id().clone(), scenario.test_sequence())])
             }
         }
     }
 
-    pub fn send_responses(&self, sender_name: &UnitName, messages: Vec<ManagerStatusMessage>) {
+    fn broadcast_jig_named(&self, jig_id: &UnitName) {
+        let jigs = self.jigs.borrow();
+        let jig = match jigs.get(jig_id) {
+            Some(ref s) => s.clone(),
+            None => return,
+        };
+        for (interface_id, _) in self.interfaces.borrow().iter() {
+            let jig = jig.borrow();
+            let messages = vec![
+                ManagerStatusMessage::Jig(jig.id().clone()),
+                ManagerStatusMessage::Describe(jig.id().kind().clone(), FieldType::Name, jig.id().id().clone(), jig.name().clone()),
+                ManagerStatusMessage::Describe(jig.id().kind().clone(), FieldType::Description, jig.id().id().clone(), jig.description().clone())
+            ];
+            self.send_messages_to(interface_id, messages);
+        }
+    }
+
+    fn broadcast_scenario_named(&self, scenario_id: &UnitName) {
+        let scenarios = self.scenarios.borrow();
+        let scenario = match scenarios.get(scenario_id) {
+            Some(ref s) => s.clone(),
+            None => return,
+        };
+        for (interface_id, _) in self.interfaces.borrow().iter() {
+            let scenario = scenario.borrow();
+            let messages = vec![
+                ManagerStatusMessage::Scenario(Some(scenario.id().clone())),
+                ManagerStatusMessage::Describe(scenario.id().kind().clone(), FieldType::Name, scenario.id().id().clone(), scenario.name().clone()),
+                ManagerStatusMessage::Describe(scenario.id().kind().clone(), FieldType::Description, scenario.id().id().clone(), scenario.description().clone())
+            ];
+            self.send_messages_to(interface_id, messages);
+        }
+    }
+
+    /// Send a Vec<ManagerStatusMessage> to a specific endpoint.
+    pub fn send_messages_to(&self, sender_name: &UnitName, messages: Vec<ManagerStatusMessage>) {
+        let mut deactivate_reason = None;
         match *sender_name.kind() {
             UnitKind::Interface => {
                 let interface_table = self.interfaces.borrow();
                 let interface = interface_table.get(sender_name).expect("Unable to find Interface in the library");
                 for msg in messages {
-                    interface.output_message(msg).expect("Unable to pass message to client");
+                    if let Err(e) = interface.borrow().output_message(msg) {
+                        deactivate_reason = Some(e);
+                        break;
+                    }
                 }
             },
             _ => (),
+        }
+        if let Some(deactivate_reason) = deactivate_reason {
+            self.deactivate(sender_name, format!("communication error: {}", deactivate_reason).as_str());
         }
     }
 }
