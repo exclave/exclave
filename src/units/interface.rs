@@ -216,7 +216,7 @@ impl Interface {
                 thread::spawn(move || Self::text_read(thr_sender_id, thr_sender, stdout));
                 let thr_sender_id = control_sender_id.clone();
                 let thr_sender = control_sender.clone();
-                thread::spawn(move || Self::text_read(thr_sender_id, thr_sender, stderr));
+                thread::spawn(move || Self::text_read_stderr(thr_sender_id, thr_sender, stderr));
             }
             InterfaceFormat::JSON => {
                 ();
@@ -342,6 +342,16 @@ impl Interface {
             .replace("\\n", "\n")
             .replace("\\r", "\r")
             .replace("\\\\", "\\")
+    }
+
+    fn text_read_stderr(id: UnitName, control: Sender<ManagerControlMessage>, output: RunningOutput) {
+        for line in BufReader::new(output).lines() {
+            let line = line.expect("Unable to get next line");
+            // If the send fails, that means the other end has closed the pipe.
+            if let Err(_) = control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(line))) {
+                break;
+            }
+        }
     }
 
     fn text_read(id: UnitName, control: Sender<ManagerControlMessage>, stdout: RunningOutput) {
