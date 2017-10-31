@@ -119,6 +119,9 @@ pub enum ManagerControlMessageContents {
 
     /// Send an INFO message to the logging system
     Log(String /* log message */),
+
+    /// Send an ERROR message to the logging system
+    LogError(String /* log message */),
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
@@ -478,6 +481,7 @@ impl UnitManager {
             ManagerControlMessageContents::Scenarios => self.send_scenarios_to(sender_name),
             ManagerControlMessageContents::Tests(ref scenario_name) => self.send_tests_to(sender_name, scenario_name),
             ManagerControlMessageContents::Log(ref txt) => self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(sender_name.clone(), txt.clone()))),
+            ManagerControlMessageContents::LogError(ref txt) => self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), txt.clone()))),
             ManagerControlMessageContents::Scenario(ref new_scenario_name) => {
                 if self.get_scenario_named(new_scenario_name).is_some() {
                     self.activate(new_scenario_name);
