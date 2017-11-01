@@ -38,20 +38,14 @@ impl UnitLoader {
     }
 
     pub fn load(&self, name: &UnitName, path: &PathBuf) {
-        use unitbroadcaster::LogEntry;
-        self.broadcaster.broadcast(&UnitEvent::Log(LogEntry::new_info(UnitName::internal("unitloader"), format!("Loading unit {} at {}", name, path.to_string_lossy()))));
         self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_started(name, path)));
     }
 
     pub fn update(&self, name: &UnitName, path: &PathBuf) {
-        use unitbroadcaster::LogEntry;
-        self.broadcaster.broadcast(&UnitEvent::Log(LogEntry::new_info(UnitName::internal("unitloader"), format!("Reoading unit {} at {}", name, path.to_string_lossy()))));
         self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_update_started(name, path)));
     }
 
     pub fn unload(&self, name: &UnitName, path: &PathBuf) {
-        use unitbroadcaster::LogEntry;
-        self.broadcaster.broadcast(&UnitEvent::Log(LogEntry::new_info(UnitName::internal("unitloader"), format!("Unloading unit {} at {}", name, path.to_string_lossy()))));
         self.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_unload_started(name, path)));
     }
 }

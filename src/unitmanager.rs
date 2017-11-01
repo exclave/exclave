@@ -770,7 +770,6 @@ impl UnitManager {
     }
 
     fn broadcast_selected_scenario(&self) {
-        self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(UnitName::internal("unitmanager"), format!("Broadcasting selected scenario"))));
         let opt = self.current_scenario.borrow();
         match *opt {
             None => return,
@@ -803,7 +802,6 @@ impl UnitManager {
     }
 
     fn broadcast_scenario_named(&self, scenario_id: &UnitName) {
-        self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(UnitName::internal("unitmanager"), format!("Broadcasting scenario named {}", scenario_id))));
         let scenarios = self.scenarios.borrow();
         let scenario = match scenarios.get(scenario_id) {
             Some(ref s) => s.clone(),
