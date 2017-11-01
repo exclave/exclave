@@ -84,7 +84,7 @@ pub enum ManagerStatusMessage {
     Hello(String /* Server identification name */),
 
     /// Describes a Type of a particular Field on a given Unit
-    Describe(UnitKind, FieldType, String /* UnitId */, String /* Value */),
+    Describe(UnitName, FieldType, String /* Value */),
 
     /// A log message from one of the units, or the system itself.
     Log(LogEntry),
@@ -654,23 +654,20 @@ impl UnitManager {
                 self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unimplemented verb: {} (args: {})", verb, remainder))));
             },
             ManagerControlMessageContents::Start(ref scenario_name_opt) => {
-                let scenario_rc = if let Some(ref scenario_name) = *scenario_name_opt {
-                    match self.scenarios.borrow().get(scenario_name) {
-                        None => {
-                            self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unable to find scenario {} to start it", scenario_name))));
-                            return;
-                        },
-                        Some(s) => s.clone(),
-                    }
+                let scenario_name = if let Some(ref scenario_name) = *scenario_name_opt {
+                    self.select(scenario_name);
+                    scenario_name.clone()
                 } else {
                     match *self.current_scenario.borrow() {
                         None => {
-                            self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), "no scenario selected to start".to_owned())));
+                            self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), "unable to start scenario: no scenario selected and no scenario specified".to_owned())));
                             return;
                         },
-                        Some(ref s) => s.clone(),
+                        Some(ref scenario) => scenario.borrow().id().clone()
                     }
                 };
+
+                self.activate(&scenario_name);
             }
         }
     }
@@ -686,8 +683,8 @@ impl UnitManager {
                 let jig = jig_rc.borrow();
                 vec![
                     ManagerStatusMessage::Jig(jig.id().clone()),
-                    ManagerStatusMessage::Describe(jig.id().kind().clone(), FieldType::Name, jig.id().id().clone(), jig.name().clone()),
-                    ManagerStatusMessage::Describe(jig.id().kind().clone(), FieldType::Description, jig.id().id().clone(), jig.description().clone())
+                    ManagerStatusMessage::Describe(jig.id().clone(), FieldType::Name, jig.name().clone()),
+                    ManagerStatusMessage::Describe(jig.id().clone(), FieldType::Description, jig.description().clone())
                 ]
             }
         };
@@ -698,8 +695,8 @@ impl UnitManager {
     pub fn send_scenarios_to(&self, sender_name: &UnitName) {
         let mut messages = vec![ManagerStatusMessage::Scenarios(self.scenarios.borrow().keys().map(|x| x.clone()).collect())];
         for (scenario_id, scenario) in self.scenarios.borrow().iter() {
-            messages.push(ManagerStatusMessage::Describe(scenario_id.kind().clone(), FieldType::Name, scenario_id.id().clone(), scenario.borrow().name().clone()));
-            messages.push(ManagerStatusMessage::Describe(scenario_id.kind().clone(), FieldType::Description, scenario_id.id().clone(), scenario.borrow().description().clone()));
+            messages.push(ManagerStatusMessage::Describe(scenario_id.clone(), FieldType::Name, scenario.borrow().name().clone()));
+            messages.push(ManagerStatusMessage::Describe(scenario_id.clone(), FieldType::Description, scenario.borrow().description().clone()));
         }
         self.send_messages_to(sender_name, messages);
     }
@@ -712,8 +709,8 @@ impl UnitManager {
                 let mut messages = vec![ManagerStatusMessage::Scenario(Some(scenario_name.clone()))];
                 for (test_id, test_rc) in scenario.tests() {
                     let test = test_rc.borrow();
-                    messages.push(ManagerStatusMessage::Describe(test_id.kind().clone(), FieldType::Name, test_id.id().clone(), test.name().clone()));
-                    messages.push(ManagerStatusMessage::Describe(test_id.kind().clone(), FieldType::Description, test_id.id().clone(), test.description().clone()));
+                    messages.push(ManagerStatusMessage::Describe(test_id.clone(), FieldType::Name, test.name().clone()));
+                    messages.push(ManagerStatusMessage::Describe(test_id.clone(), FieldType::Description, test.description().clone()));
                 }
                 messages.push(ManagerStatusMessage::Tests(scenario.id().clone(), scenario.test_sequence()));
                 messages
@@ -794,8 +791,8 @@ impl UnitManager {
         for (interface_id, _) in self.interfaces.borrow().iter() {
             let jig = jig.borrow();
             let messages = vec![
-                ManagerStatusMessage::Describe(jig.id().kind().clone(), FieldType::Name, jig.id().id().clone(), jig.name().clone()),
-                ManagerStatusMessage::Describe(jig.id().kind().clone(), FieldType::Description, jig.id().id().clone(), jig.description().clone())
+                ManagerStatusMessage::Describe(jig.id().clone(), FieldType::Name, jig.name().clone()),
+                ManagerStatusMessage::Describe(jig.id().clone(), FieldType::Description, jig.description().clone())
             ];
             self.send_messages_to(interface_id, messages);
         }
@@ -813,8 +810,8 @@ impl UnitManager {
             let scenario = scenario.borrow();
             vec![
                 // Rebroadcast the list of scenarios, since that may have changed.
-                ManagerStatusMessage::Describe(scenario_id.kind().clone(), FieldType::Name, scenario_id.id().clone(), scenario.name().clone()),
-                ManagerStatusMessage::Describe(scenario_id.kind().clone(), FieldType::Description, scenario_id.id().clone(), scenario.description().clone())
+                ManagerStatusMessage::Describe(scenario_id.clone(), FieldType::Name, scenario.name().clone()),
+                ManagerStatusMessage::Describe(scenario_id.clone(), FieldType::Description, scenario.description().clone())
             ]
         };
         for (interface_id, _) in self.interfaces.borrow().iter() {
@@ -831,8 +828,8 @@ impl UnitManager {
         for (interface_id, _) in self.interfaces.borrow().iter() {
             let unit = unit.borrow();
             let messages = vec![
-                ManagerStatusMessage::Describe(unit_id.kind().clone(), FieldType::Name, unit_id.id().clone(), unit.name().clone()),
-                ManagerStatusMessage::Describe(unit_id.kind().clone(), FieldType::Description, unit_id.id().clone(), unit.description().clone())
+                ManagerStatusMessage::Describe(unit_id.clone(), FieldType::Name, unit.name().clone()),
+                ManagerStatusMessage::Describe(unit_id.clone(), FieldType::Description, unit.description().clone())
             ];
             self.send_messages_to(interface_id, messages);
         }

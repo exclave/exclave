@@ -304,8 +304,8 @@ impl Interface {
                 }
                 writeln!(process, "")
             },
-            ManagerStatusMessage::Describe(class, field, name, value) => {
-                writeln!(process, "DESCRIBE {}", Self::cfti_escape(&format!("{} {} {} {}", class, field, name, value)))
+            ManagerStatusMessage::Describe(id, field, value) => {
+                writeln!(process, "DESCRIBE {}", Self::cfti_escape(&format!("{} {} {} {}", id.kind(), field, id.id(), value)))
             }
             ManagerStatusMessage::Log(l) => writeln!(
                 process,
