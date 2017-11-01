@@ -188,7 +188,7 @@ impl ScenarioDescription {
         self.get_test_order(manager)
     }
 
-    pub fn select(&self,
+    pub fn load(&self,
                   manager: &UnitManager,
                   config: &Config)
                   -> Result<Scenario, UnitIncompatibleReason> {

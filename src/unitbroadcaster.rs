@@ -32,6 +32,9 @@ pub enum UnitStatus {
     /// Selected at a time.
     Selected,
 
+    /// The unit couldn't be selected for some reason.
+    SelectFailed(String /* reason */),
+
     /// The unit has been deselected (but is still loaded, and may be selected later)
     Deselected(String /* reason */),
 
@@ -71,6 +74,7 @@ impl fmt::Display for UnitStatus {
             &UnitStatus::Incompatible(ref x) => write!(f, "Incompatible: {}", x),
             &UnitStatus::Loaded => write!(f, "Loaded"),
             &UnitStatus::Selected => write!(f, "Selected"),
+            &UnitStatus::SelectFailed(ref reason) => write!(f, "Select failed: {}", reason),
             &UnitStatus::Deselected(ref reason) => write!(f, "Deselected: {}", reason),
             &UnitStatus::Active => write!(f, "Active"),
             &UnitStatus::ActivationFailed(ref reason) => write!(f, "Activation failed: {}", reason),
@@ -141,6 +145,13 @@ impl UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
             status: UnitStatus::Selected,
+        }
+    }
+
+    pub fn new_select_failed(name: &UnitName, msg: String) -> UnitStatusEvent {
+        UnitStatusEvent {
+            name: name.clone(),
+            status: UnitStatus::SelectFailed(msg),
         }
     }
 

@@ -19,17 +19,17 @@ use units::test::{Test, TestDescription};
 macro_rules! load {
     ($slf:ident, $dest:ident, $desc:ident) => {
         {
-            // If the item exists in the array already, then it is active and will be deactivated first.
+            // If the item exists in the array already, then it is active and will be deselected first.
             if $slf.$dest.borrow_mut().contains_key($desc.id()) {
                 // Deactivate it before unloading
                 $slf.deactivate($desc.id(), "reloading");
                 $slf.deselect($desc.id(), "reloading");
             };
-            // "Select" the Interface, which means we can activate it later on.
-            match $desc.select($slf, &*$slf.cfg.lock().unwrap()) {
+            // "Load" the Unit, which means we can select or activate it later on.
+            match $desc.load($slf, &*$slf.cfg.lock().unwrap()) {
                 Ok(o) => {
                     let new_item = Rc::new(RefCell::new(o));
-                    // Announce the fact that the interface was loaded successfully.
+                    // Announce the fact that the unit was loaded successfully.
                     $slf.bc
                         .broadcast(&UnitEvent::Status(UnitStatusEvent::new_loaded($desc.id())));
 
@@ -229,10 +229,10 @@ impl UnitManager {
 
         // Announce that the interface was successfully started.
         match result {
-            Ok(_) => self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(id))),
+            Ok(_) => self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected(id))),
             Err(e) =>
                self.bc.broadcast(
-                    &UnitEvent::Status(UnitStatusEvent::new_active_failed(id, format!("unable to deactivate: {}", e)))),
+                    &UnitEvent::Status(UnitStatusEvent::new_select_failed(id, format!("unable to select: {}", e)))),
         }
     }
 
@@ -274,7 +274,7 @@ impl UnitManager {
             None => return Err(UnitSelectError::UnitNotFound),
         };
 
-        // If there is an existing current scenario, check to see if the ID matches.
+        // If there is an existing current jig, check to see if the ID matches.
         // If so, there is nothing to do.
         // If not, deselect it.
         // There Can Only Be One.
@@ -292,11 +292,17 @@ impl UnitManager {
             self.deselect(id, "switching to a new jig");
         }
         
-        // Select this scenario.
+        // Select this jig.
         new_jig.borrow_mut().select()?;
         *self.current_jig.borrow_mut() = Some(new_jig.clone());
         self.bc
             .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(id)));
+
+        // If this jig has a default scenario, select that too.
+        if let Some(ref scenario_name) = *new_jig.borrow().default_scenario() {
+            self.select(scenario_name);
+        }
+
         Ok(())
     }
 
@@ -402,7 +408,7 @@ impl UnitManager {
             Ok(_) => self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(id))),
             Err(e) =>
                self.bc.broadcast(
-                    &UnitEvent::Status(UnitStatusEvent::new_active_failed(id, format!("unable to deactivate: {}", e)))),
+                    &UnitEvent::Status(UnitStatusEvent::new_active_failed(id, format!("unable to activate: {}", e)))),
         }
     }
 
@@ -596,9 +602,10 @@ impl UnitManager {
     fn status_message(&self, msg: &UnitStatusEvent) {
         let &UnitStatusEvent {ref name, ref status} = msg;
         match status {
-            &UnitStatus::Active => match name.kind() {
+            &UnitStatus::Loaded => match name.kind() {
                 &UnitKind::Jig => self.broadcast_jig_named(name),
                 &UnitKind::Scenario => self.broadcast_scenario_named(name),
+                &UnitKind::Test => self.broadcast_test_named(name),
                 _ => (),
             },
             _ => (),
@@ -762,6 +769,22 @@ impl UnitManager {
                 ManagerStatusMessage::Scenario(Some(scenario.id().clone())),
                 ManagerStatusMessage::Describe(scenario.id().kind().clone(), FieldType::Name, scenario.id().id().clone(), scenario.name().clone()),
                 ManagerStatusMessage::Describe(scenario.id().kind().clone(), FieldType::Description, scenario.id().id().clone(), scenario.description().clone())
+            ];
+            self.send_messages_to(interface_id, messages);
+        }
+    }
+
+    fn broadcast_test_named(&self, unit_id: &UnitName) {
+        let units = self.tests.borrow();
+        let unit = match units.get(unit_id) {
+            Some(ref s) => s.clone(),
+            None => return,
+        };
+        for (interface_id, _) in self.interfaces.borrow().iter() {
+            let unit = unit.borrow();
+            let messages = vec![
+                ManagerStatusMessage::Describe(unit_id.kind().clone(), FieldType::Name, unit_id.id().clone(), unit.name().clone()),
+                ManagerStatusMessage::Describe(unit_id.kind().clone(), FieldType::Description, unit_id.id().clone(), unit.description().clone())
             ];
             self.send_messages_to(interface_id, messages);
         }

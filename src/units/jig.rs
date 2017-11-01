@@ -141,7 +141,7 @@ impl JigDescription {
         &self.id
     }
 
-    pub fn select(
+    pub fn load(
         &self,
         manager: &UnitManager,
         config: &Config,

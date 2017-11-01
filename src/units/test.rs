@@ -193,7 +193,7 @@ impl TestDescription {
         Err(UnitIncompatibleReason::IncompatibleJig)
     }
 
-    pub fn select(&self, 
+    pub fn load(&self, 
         manager: &UnitManager,
         config: &Config) -> Result<Test, UnitIncompatibleReason> {
         self.is_compatible(manager, config)?;
