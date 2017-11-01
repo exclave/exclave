@@ -124,7 +124,7 @@ pub enum ManagerControlMessageContents {
     LogError(String /* log message */),
 
     /// Start running a scenario, or the default scenario if None
-    Start(Option<UnitName>),
+    StartScenario(Option<UnitName>),
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
@@ -653,7 +653,7 @@ impl UnitManager {
             ManagerControlMessageContents::Unimplemented(ref verb, ref remainder) => {
                 self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unimplemented verb: {} (args: {})", verb, remainder))));
             },
-            ManagerControlMessageContents::Start(ref scenario_name_opt) => {
+            ManagerControlMessageContents::StartScenario(ref scenario_name_opt) => {
                 let scenario_name = if let Some(ref scenario_name) = *scenario_name_opt {
                     self.select(scenario_name);
                     scenario_name.clone()

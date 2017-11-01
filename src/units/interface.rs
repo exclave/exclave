@@ -396,14 +396,17 @@ impl Interface {
                 },
                 "jig" => ManagerControlMessageContents::Jig,
                 "log" => ManagerControlMessageContents::Log(words.join(" ")),
-                /*
                 "start" => {
                     if words.is_empty() {
-                        ControlMessageContents::StartScenario(None)
+                        ManagerControlMessageContents::StartScenario(None)
                     } else {
-                        ControlMessageContents::StartScenario(Some(words[0].to_lowercase()))
+                        match UnitName::from_str(words.get(0).unwrap_or(&"".to_owned()).to_lowercase().as_str(), "scenario") {
+                            Err(e) => ManagerControlMessageContents::Error(format!("Invalid scenario name: {}", e)),
+                            Ok(o) => ManagerControlMessageContents::StartScenario(Some(o)),
+                        }
                     }
                 }
+                /*
                 "abort" => ControlMessageContents::AbortTests,
                 "pong" => ControlMessageContents::Pong(words[0].to_lowercase()),
                 "hello" => ControlMessageContents::Hello(words.join(" ")),
