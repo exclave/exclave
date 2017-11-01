@@ -23,26 +23,23 @@ macro_rules! process_if {
                 Ok(description) => {
                     let id = description.id().clone();
 
-                    // Add the jig name to a list of "dirty jigs" that will be checked during "rescan()"
+                    // Insert it into the description table
+                    $slf.$desc.borrow_mut().insert(id.clone(), description);
+
+                    // Add the unit name to a list of "dirty units" that will be checked during "rescan()"
                     $slf.$drty.borrow_mut().insert(id.clone(), ());
 
                     // Add an entry to the status to determine whether this unit is new or not.
                     $slf.unit_status
                         .borrow_mut()
-                        .insert(id.clone(), $status.clone());
-
-                    // Insert it into the description table
-                    $slf.$desc.borrow_mut().insert(id, description);
-
-                    // Since the unit was loaded successfully, mark it as "Selected".
-                    $slf.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected($name)));
+                        .insert(id, $status.clone());
 
                     $slf.broadcaster
                         .broadcast(&UnitEvent::Category(UnitCategoryEvent::new($tstkind,
                                                                             &format!(
                                 "Number of units \
-                                loaded: {}",
-                                $slf.jig_descriptions.borrow().len()
+                                on disk: {}",
+                                $slf.$desc.borrow().len()
                             ))));
                 }
             }
@@ -51,19 +48,32 @@ macro_rules! process_if {
 }
 
 macro_rules! load_units_for_activation {
-    ($slf:ident, $statuses:ident, $dirty:ident, $descriptions:ident, $select:ident) => {
+    ($slf:ident, $statuses:ident, $dirty:ident, $descriptions:ident, $load:ident) => {
         {
             let mut to_remove = vec![];
             for (id, _) in $slf.$dirty.borrow().iter() {
-                if let Err(_) = match $statuses.get(id).unwrap() {
-                    &UnitStatus::LoadStarted(_) => {
-                        $slf.unit_manager.borrow_mut().$select($slf.$descriptions.borrow().get(id).unwrap())
-                    }
-                    &UnitStatus::UpdateStarted(_) => {
-                        $slf.unit_manager.borrow_mut().$select($slf.$descriptions.borrow().get(id).unwrap())
-                    }
+                let status = $statuses.get(id);
+                if status.is_none() {
+                    to_remove.push(id.clone());
+                    continue;
+                }
+                let status = status.unwrap();
+
+                let descriptions = $slf.$descriptions.borrow();
+                let description = descriptions.get(id);
+                if description.is_none() {
+                    to_remove.push(id.clone());
+                    continue;
+                }
+                let description = description.unwrap();
+
+                let load_result = match status {
+                    &UnitStatus::LoadStarted(_) => $slf.unit_manager.borrow_mut().$load(description),
+                    &UnitStatus::UpdateStarted(_) => $slf.unit_manager.borrow_mut().$load(description),
                     x => panic!("Unexpected unit status: {}", x),
-                } {
+                };
+
+                if load_result.is_err() {
                     to_remove.push(id.clone());
                 }
             }
@@ -88,18 +98,8 @@ macro_rules! select_and_activate_units {
 }
 
 macro_rules! load_units {
-    ($slf:ident, $statuses:ident, $dirty:ident, $descriptions:ident, $select:ident) => {
-        for (id, _) in $slf.$dirty.borrow().iter() {
-            match $statuses.get(id).unwrap() {
-                &UnitStatus::LoadStarted(_) => {
-                    $slf.unit_manager.borrow_mut().$select($slf.$descriptions.borrow().get(id).unwrap()).ok()
-                }
-                &UnitStatus::UpdateStarted(_) => {
-                    $slf.unit_manager.borrow_mut().$select($slf.$descriptions.borrow().get(id).unwrap()).ok()
-                }
-                x => panic!("Unexpected unit status: {}", x),
-            };
-        }
+    ($slf:ident, $statuses:ident, $dirty:ident, $descriptions:ident, $load:ident) => {
+        load_units_for_activation!($slf, $statuses, $dirty, $descriptions, $load);
         $slf.$dirty.borrow_mut().clear();
     }
 }
@@ -282,9 +282,17 @@ impl UnitLibrary {
                         process_if!(self, name, status, UnitKind::Scenario, path, ScenarioDescription, dirty_scenarios, scenario_descriptions);
                     }
                     &UnitStatus::UnloadStarted(ref path) => {
+                        // Add the unit name to a list of "dirty units" that will be checked during "rescan()"
                         self.unit_status
                             .borrow_mut()
                             .insert(name.clone(), UnitStatus::UnloadStarted(path.clone()));
+                        match name.kind() {
+                            &UnitKind::Interface => self.dirty_interfaces.borrow_mut().insert(name.clone(), ()),
+                            &UnitKind::Jig => self.dirty_jigs.borrow_mut().insert(name.clone(), ()),
+                            &UnitKind::Test => self.dirty_tests.borrow_mut().insert(name.clone(), ()),
+                            &UnitKind::Scenario => self.dirty_scenarios.borrow_mut().insert(name.clone(), ()),
+                            &UnitKind::Internal => None,
+                        };
                     },
                     _ => (),
                 }

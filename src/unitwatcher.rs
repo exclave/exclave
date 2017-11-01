@@ -22,7 +22,7 @@ impl UnitWatcher {
 
         // Automatically select the best implementation for your platform.
         // You can also access each implementation directly e.g. INotifyWatcher.
-        let watcher: RecommendedWatcher = Watcher::new(watcher_tx, Duration::from_secs(2))
+        let watcher: RecommendedWatcher = Watcher::new(watcher_tx, Duration::from_secs(1))
             .expect("Unable to create file watcher");
 
         // This is a simple loop, but you may want to use more complex logic here,
@@ -37,6 +37,13 @@ impl UnitWatcher {
                             notify::DebouncedEvent::Create(path) => UnitStatusEvent::new_added(&path),
                             notify::DebouncedEvent::Write(path) => UnitStatusEvent::new_updated(&path),
                             notify::DebouncedEvent::Remove(path) => UnitStatusEvent::new_removed(&path),
+                            // Convert Rename() into removed/added
+                            notify::DebouncedEvent::Rename(old_name, new_name) => {
+                                if let Some(evt) = UnitStatusEvent::new_removed(&old_name) {
+                                    thread_broadcaster.broadcast(&UnitEvent::Status(evt));
+                                }
+                                UnitStatusEvent::new_added(&new_name)
+                            } 
                             _ => None,
                         };
 

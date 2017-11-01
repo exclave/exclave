@@ -28,12 +28,12 @@ macro_rules! load {
             // "Load" the Unit, which means we can select or activate it later on.
             match $desc.load($slf, &*$slf.cfg.lock().unwrap()) {
                 Ok(o) => {
-                    let new_item = Rc::new(RefCell::new(o));
+                    $slf.$dest.borrow_mut().insert($desc.id().clone(), Rc::new(RefCell::new(o)));
+
                     // Announce the fact that the unit was loaded successfully.
                     $slf.bc
                         .broadcast(&UnitEvent::Status(UnitStatusEvent::new_loaded($desc.id())));
 
-                    $slf.$dest.borrow_mut().insert($desc.id().clone(), new_item.clone());
                     Ok($desc.id().clone())
                 }
                 Err(e) => {
@@ -50,7 +50,7 @@ macro_rules! load {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum FieldType {
     Name,
     Description,
@@ -66,7 +66,7 @@ impl fmt::Display for FieldType {
 }
 
 /// Messages for Library -> Unit communication
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ManagerStatusMessage {
     /// Return the first name of the jig we're running on.
     Jig(UnitName /* Name of the jig */),
@@ -608,6 +608,11 @@ impl UnitManager {
                 &UnitKind::Test => self.broadcast_test_named(name),
                 _ => (),
             },
+            &UnitStatus::Selected => match name.kind() {
+                &UnitKind::Jig => self.broadcast_selected_jig(),
+                &UnitKind::Scenario => self.broadcast_selected_scenario(),
+                _ => (),
+            },
             _ => (),
         }
     }
@@ -740,6 +745,39 @@ impl UnitManager {
         }
     }
 
+    fn broadcast_selected_jig(&self) {
+        let jig_opt = self.current_jig.borrow();
+        match *jig_opt {
+            None => return,
+            Some(ref j) => {
+                let jig = j.borrow();
+                for (interface_id, _) in self.interfaces.borrow().iter() {
+                    let messages = vec![
+                        ManagerStatusMessage::Jig(jig.id().clone())
+                    ];
+                    self.send_messages_to(interface_id, messages);
+                }
+            }
+        }
+    }
+
+    fn broadcast_selected_scenario(&self) {
+        self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(UnitName::internal("unitmanager"), format!("Broadcasting selected scenario"))));
+        let opt = self.current_scenario.borrow();
+        match *opt {
+            None => return,
+            Some(ref j) => {
+                let val = j.borrow();
+                for (interface_id, _) in self.interfaces.borrow().iter() {
+                    let messages = vec![
+                        ManagerStatusMessage::Scenario(Some(val.id().clone()))
+                    ];
+                    self.send_messages_to(interface_id, messages);
+                }
+            }
+        }
+    }
+
     fn broadcast_jig_named(&self, jig_id: &UnitName) {
         let jigs = self.jigs.borrow();
         let jig = match jigs.get(jig_id) {
@@ -749,7 +787,6 @@ impl UnitManager {
         for (interface_id, _) in self.interfaces.borrow().iter() {
             let jig = jig.borrow();
             let messages = vec![
-                ManagerStatusMessage::Jig(jig.id().clone()),
                 ManagerStatusMessage::Describe(jig.id().kind().clone(), FieldType::Name, jig.id().id().clone(), jig.name().clone()),
                 ManagerStatusMessage::Describe(jig.id().kind().clone(), FieldType::Description, jig.id().id().clone(), jig.description().clone())
             ];
@@ -758,19 +795,24 @@ impl UnitManager {
     }
 
     fn broadcast_scenario_named(&self, scenario_id: &UnitName) {
+        self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(UnitName::internal("unitmanager"), format!("Broadcasting scenario named {}", scenario_id))));
         let scenarios = self.scenarios.borrow();
         let scenario = match scenarios.get(scenario_id) {
             Some(ref s) => s.clone(),
             None => return,
         };
-        for (interface_id, _) in self.interfaces.borrow().iter() {
+
+        let messages = {
             let scenario = scenario.borrow();
-            let messages = vec![
-                ManagerStatusMessage::Scenario(Some(scenario.id().clone())),
+            vec![
+                // Rebroadcast the list of scenarios, since that may have changed.
+                ManagerStatusMessage::Scenarios(self.scenarios.borrow().keys().map(|x| x.clone()).collect()),
                 ManagerStatusMessage::Describe(scenario.id().kind().clone(), FieldType::Name, scenario.id().id().clone(), scenario.name().clone()),
                 ManagerStatusMessage::Describe(scenario.id().kind().clone(), FieldType::Description, scenario.id().id().clone(), scenario.description().clone())
-            ];
-            self.send_messages_to(interface_id, messages);
+            ]
+        };
+        for (interface_id, _) in self.interfaces.borrow().iter() {
+            self.send_messages_to(interface_id, messages.clone());
         }
     }
 
