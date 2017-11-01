@@ -12,7 +12,7 @@ use self::regex::Regex;
 use self::systemd_parser::items::DirectiveEntry;
 
 use config::Config;
-use unit::{UnitName, UnitActivateError, UnitDeactivateError,
+use unit::{UnitName, UnitActivateError, UnitDeactivateError, UnitSelectError, UnitDeselectError,
            UnitIncompatibleReason, UnitDescriptionError};
 use unitmanager::UnitManager;
 
@@ -220,6 +220,14 @@ impl Test {
             suggestions: desc.suggests.clone(),
             provides: desc.provides.clone(),
          }
+    }
+
+    pub fn select(&self) -> Result<(), UnitSelectError> {
+        Ok(())
+    }
+
+    pub fn deselect(&self) -> Result<(), UnitDeselectError> {
+        Ok(())
     }
 
     pub fn activate(&self) -> Result<(), UnitActivateError> {

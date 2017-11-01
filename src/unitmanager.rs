@@ -269,15 +269,49 @@ impl UnitManager {
     }
 
     fn select_jig(&self, id: &UnitName) -> Result<(), UnitSelectError> {
-        unimplemented!();
+        let new_jig = match self.jigs.borrow().get(id) {
+            Some(s) => s.clone(),
+            None => return Err(UnitSelectError::UnitNotFound),
+        };
+
+        // If there is an existing current scenario, check to see if the ID matches.
+        // If so, there is nothing to do.
+        // If not, deselect it.
+        // There Can Only Be One.
+        let should_deselect = if let Some(ref old_jig) = *self.current_jig.borrow() {
+            if old_jig.borrow().id() == id {
+                // Units match, so do nothing.
+                return Ok(());
+            }
+            true
+        } else {
+            false
+        };
+
+        if should_deselect {
+            self.deselect(id, "switching to a new jig");
+        }
+        
+        // Select this scenario.
+        new_jig.borrow_mut().select()?;
+        *self.current_jig.borrow_mut() = Some(new_jig.clone());
+        self.bc
+            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(id)));
+        Ok(())
     }
 
     fn select_test(&self, id: &UnitName) -> Result<(), UnitSelectError> { 
-        unimplemented!();
+        match self.tests.borrow().get(id) {
+            Some(ref s) => s.borrow_mut().select(),
+            None => Err(UnitSelectError::UnitNotFound),
+        }
     }
 
     fn select_interface(&self, id: &UnitName) -> Result<(), UnitSelectError> {
-        unimplemented!();
+        match self.interfaces.borrow().get(id) {
+            Some(ref s) => s.borrow_mut().select(),
+            None => Err(UnitSelectError::UnitNotFound),
+        }
     }
 
     pub fn deselect(&self, id: &UnitName, reason: &str) {
@@ -298,12 +332,18 @@ impl UnitManager {
         }
     }
 
-    fn deselect_test(&self, _id: &UnitName) -> Result<(), UnitDeselectError> {
-        unimplemented!();
+    fn deselect_test(&self, id: &UnitName) -> Result<(), UnitDeselectError> {
+        match self.tests.borrow().get(id) {
+            Some(ref s) => s.borrow_mut().deselect(),
+            None => Err(UnitDeselectError::UnitNotFound),
+        }
     }
 
-    fn deselect_interface(&self, _id: &UnitName) -> Result<(), UnitDeselectError> {
-        unimplemented!();
+    fn deselect_interface(&self, id: &UnitName) -> Result<(), UnitDeselectError> {
+        match self.interfaces.borrow().get(id) {
+            Some(ref s) => s.borrow_mut().deselect(),
+            None => Err(UnitDeselectError::UnitNotFound),
+        }
     }
 
     fn deselect_jig(&self, id: &UnitName) -> Result<(), UnitDeselectError> {
@@ -380,52 +420,35 @@ impl UnitManager {
     }
 
     /// Set the new jig as "Active".
-    /// If there is already an "Active" jig, then deactivate it.
-    /// Only do so if there aren't any other valid, active jigs.
+    /// The jig must already be set as the current jig.
     fn activate_jig(&self, id: &UnitName) -> Result<(), UnitActivateError> {
-        let new_jig = match self.jigs.borrow().get(id) {
-            Some(s) => s.clone(),
-            None => return Err(UnitActivateError::UnitNotFound),
-        };
+        let current_jig_opt = self.current_jig.borrow();
 
-        // If there is an existing current jig, deactivate it.
-        // There Can Only Be One.
-        if let Some(ref old_jig) = self.current_jig.borrow_mut().take() {
-            self.deactivate(old_jig.borrow().id(), "switching to a different jig");
+        match *current_jig_opt {
+            None => Err(UnitActivateError::UnitNotSelected),
+            Some(ref s) => if s.borrow().id() != id {
+                Err(UnitActivateError::UnitNotSelected)
+            } else {
+                // Activate this jig.
+                s.borrow_mut().activate()
+            }
         }
-
-        // Activate this jig.
-        new_jig.borrow_mut().activate()?;
-        *self.current_jig.borrow_mut() = Some(new_jig.clone());
-        self.bc
-            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(id)));
-
-        // If there is a default scenario, activate that too.
-        if let Some(new_scenario_id) = new_jig.borrow().default_scenario().clone() {
-            self.activate_scenario(&new_scenario_id)?;
-        }
-
-        Ok(())
     }
 
+    /// Set the specified scenario as "Active".
+    /// This actually runs the scenario.
     fn activate_scenario(&self, id: &UnitName) -> Result<(), UnitActivateError> {
-        let new_scenario = match self.scenarios.borrow().get(id) {
-            Some(s) => s.clone(),
-            None => return Err(UnitActivateError::UnitNotFound),
-        };
+        let current_opt = self.current_scenario.borrow();
 
-        // If there is an existing current scenario, deactivate it.
-        // There Can Only Be One.
-        if let Some(ref old_scenario) = self.current_scenario.borrow_mut().take() {
-            self.deactivate(old_scenario.borrow().id(), "switching to a new scenario");
+        match *current_opt {
+            None => Err(UnitActivateError::UnitNotSelected),
+            Some(ref s) => if s.borrow().id() != id {
+                Err(UnitActivateError::UnitNotSelected)
+            } else {
+                // Activate this scenario.
+                s.borrow_mut().activate()
+            }
         }
-        
-        // Activate this scenario.
-        new_scenario.borrow_mut().activate()?;
-        *self.current_scenario.borrow_mut() = Some(new_scenario.clone());
-        self.bc
-            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(id)));
-        Ok(())
     }
 
     fn activate_test(&self, _id: &UnitName) -> Result<(), UnitActivateError> {
@@ -457,8 +480,12 @@ impl UnitManager {
         }
     }
 
-    fn deactivate_test(&self, _id: &UnitName) -> Result<(), UnitDeactivateError> {
-        unimplemented!();
+    fn deactivate_test(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
+        let tests = self.tests.borrow();
+        match tests.get(id) {
+            None => return Err(UnitDeactivateError::UnitNotFound),
+            Some(test) => test.borrow_mut().deactivate(),
+        }
     }
 
     fn deactivate_scenario(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
@@ -481,6 +508,21 @@ impl UnitManager {
     }
 
     fn deactivate_jig(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
+        let mut current_opt = self.current_jig.borrow_mut();
+
+        // If the specified jig isn't the current jig, then there's nothing to do.
+        match *current_opt {
+            None => return Ok(()),
+            Some(ref s) => {
+                let current = s.borrow();
+                if current.id() != id {
+                    return Ok(());
+                }
+            }
+        }
+
+        let rc = current_opt.take().unwrap();
+        rc.borrow_mut().deactivate()?;
         Ok(())
     }
 

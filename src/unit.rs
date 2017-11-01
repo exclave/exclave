@@ -229,6 +229,9 @@ pub enum UnitActivateError {
     /// We tried to activate a unit based on its ID, but it wasn't found.
     UnitNotFound,
 
+    /// Tried to activate a unit that wasn't selected.
+    UnitNotSelected,
+
     /// We tried to Exec, but an error occurred.
     ExecFailed(RunnyError),
 }
@@ -257,6 +260,7 @@ impl fmt::Display for UnitActivateError {
                 }
             },
             &UnitActivateError::UnitNotFound => write!(f, "Couldn't find unit by id"),
+            &UnitActivateError::UnitNotSelected => write!(f, "Tried to activate a deselected unit"),
         }
     }
 }

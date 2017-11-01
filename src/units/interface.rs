@@ -10,7 +10,7 @@ use std::thread;
 use std::time::Duration;
 
 use config::Config;
-use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason,
+use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason, UnitSelectError, UnitDeselectError,
            UnitName};
 use unitmanager::{ManagerControlMessage, ManagerControlMessageContents, ManagerStatusMessage,
                   UnitManager};
@@ -188,6 +188,14 @@ impl Interface {
 
     pub fn id(&self) -> &UnitName {
         &self.id
+    }
+
+    pub fn select(&self) -> Result<(), UnitSelectError> {
+        Ok(())
+    }
+
+    pub fn deselect(&self) -> Result<(), UnitDeselectError> {
+        Ok(())
     }
 
     pub fn activate(
