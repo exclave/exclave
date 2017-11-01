@@ -9,29 +9,29 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use config::Config;
-use unit::{UnitName, UnitKind, UnitActivateError, UnitDeactivateError};
+use unit::{UnitName, UnitKind, UnitActivateError, UnitDeactivateError, UnitSelectError, UnitDeselectError};
 use unitbroadcaster::{UnitBroadcaster, UnitEvent, UnitStatusEvent, UnitStatus, LogEntry};
 use units::interface::{Interface, InterfaceDescription};
 use units::jig::{Jig, JigDescription};
 use units::scenario::{Scenario, ScenarioDescription};
 use units::test::{Test, TestDescription};
 
-macro_rules! select {
+macro_rules! load {
     ($slf:ident, $dest:ident, $desc:ident) => {
         {
             // If the item exists in the array already, then it is active and will be deactivated first.
             if $slf.$dest.borrow_mut().contains_key($desc.id()) {
                 // Deactivate it before unloading
                 $slf.deactivate($desc.id(), "reloading");
-                $slf.deselect($desc.id());
+                $slf.deselect($desc.id(), "reloading");
             };
             // "Select" the Interface, which means we can activate it later on.
             match $desc.select($slf, &*$slf.cfg.lock().unwrap()) {
                 Ok(o) => {
                     let new_item = Rc::new(RefCell::new(o));
-                    // Announce the fact that the interface was selected successfully.
+                    // Announce the fact that the interface was loaded successfully.
                     $slf.bc
-                        .broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected($desc.id())));
+                        .broadcast(&UnitEvent::Status(UnitStatusEvent::new_loaded($desc.id())));
 
                     $slf.$dest.borrow_mut().insert($desc.id().clone(), new_item.clone());
                     Ok($desc.id().clone())
@@ -122,6 +122,9 @@ pub enum ManagerControlMessageContents {
 
     /// Send an ERROR message to the logging system
     LogError(String /* log message */),
+
+    /// Start running a scenario, or the default scenario if None
+    Start(Option<UnitName>),
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
@@ -199,38 +202,150 @@ impl UnitManager {
         self.control_sender.clone()
     }
 
-    pub fn select_interface(&self, description: &InterfaceDescription) -> Result<UnitName, ()> {
-        select!(self, interfaces, description)
+    pub fn load_interface(&self, description: &InterfaceDescription) -> Result<UnitName, ()> {
+        load!(self, interfaces, description)
     }
 
-    pub fn select_test(&self, desceription: &TestDescription) -> Result<UnitName, ()> {
-        select!(self, tests, desceription)
+    pub fn load_test(&self, desceription: &TestDescription) -> Result<UnitName, ()> {
+        load!(self, tests, desceription)
     }
 
-    pub fn select_jig(&self, desceription: &JigDescription) -> Result<UnitName, ()> {
-        select!(self, jigs, desceription)
+    pub fn load_jig(&self, desceription: &JigDescription) -> Result<UnitName, ()> {
+        load!(self, jigs, desceription)
     }
 
-    pub fn select_scenario(&self, desceription: &ScenarioDescription) -> Result<UnitName, ()> {
-        select!(self, scenarios, desceription)
+    pub fn load_scenario(&self, desceription: &ScenarioDescription) -> Result<UnitName, ()> {
+        load!(self, scenarios, desceription)
     }
 
-    pub fn deselect(&self, id: &UnitName) {
+    pub fn select(&self, id: &UnitName) {
+        let result = match *id.kind() {
+            UnitKind::Interface => self.select_interface(id),
+            UnitKind::Jig => self.select_jig(id),
+            UnitKind::Scenario => self.select_scenario(id),
+            UnitKind::Test => self.select_test(id),
+            UnitKind::Internal => Ok(()),
+        };
+
+        // Announce that the interface was successfully started.
+        match result {
+            Ok(_) => self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(id))),
+            Err(e) =>
+               self.bc.broadcast(
+                    &UnitEvent::Status(UnitStatusEvent::new_active_failed(id, format!("unable to deactivate: {}", e)))),
+        }
+    }
+
+    pub fn select_scenario(&self, id: &UnitName) -> Result<(), UnitSelectError> {
+        let new_scenario = match self.scenarios.borrow().get(id) {
+            Some(s) => s.clone(),
+            None => return Err(UnitSelectError::UnitNotFound),
+        };
+
+        // If there is an existing current scenario, check to see if the ID matches.
+        // If so, there is nothing to do.
+        // If not, deselect it.
+        // There Can Only Be One.
+        let should_deselect = if let Some(ref old_scenario) = *self.current_scenario.borrow() {
+            if old_scenario.borrow().id() == id {
+                // Units match, so do nothing.
+                return Ok(());
+            }
+            true
+        } else {
+            false
+        };
+
+        if should_deselect {
+            self.deselect(id, "switching to a new scenario");
+        }
+        
+        // Select this scenario.
+        new_scenario.borrow_mut().select()?;
+        *self.current_scenario.borrow_mut() = Some(new_scenario.clone());
+        self.bc
+            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(id)));
+        Ok(())
+    }
+
+    fn select_jig(&self, id: &UnitName) -> Result<(), UnitSelectError> {
+        unimplemented!();
+    }
+
+    fn select_test(&self, id: &UnitName) -> Result<(), UnitSelectError> { 
+        unimplemented!();
+    }
+
+    fn select_interface(&self, id: &UnitName) -> Result<(), UnitSelectError> {
+        unimplemented!();
+    }
+
+    pub fn deselect(&self, id: &UnitName, reason: &str) {
         // Remove the item from its associated Rc array.
         // Note that because these are Rcs, they may live on for a little while
         // longer as references in other objects.
         let result = match id.kind() {
-            &UnitKind::Interface => self.interfaces.borrow_mut().remove(id).is_some(),
-            &UnitKind::Test => self.tests.borrow_mut().remove(id).is_some(),
-            &UnitKind::Scenario => self.scenarios.borrow_mut().remove(id).is_some(),
-            &UnitKind::Jig => self.jigs.borrow_mut().remove(id).is_some(),
-            &UnitKind::Internal => false,
+            &UnitKind::Interface => self.deselect_interface(id),
+            &UnitKind::Test => self.deselect_test(id),
+            &UnitKind::Scenario => self.deselect_scenario(id),
+            &UnitKind::Jig => self.deselect_jig(id),
+            &UnitKind::Internal => Ok(()),
         };
 
-        if result {
-            // After deactivating the old item, deselect it.
-            self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_deselected(id)));
+        // A not-okay result is fine, it just means we couldn't find the unit.
+        if result.is_ok() {
+            self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_deselected(id, reason.to_owned())));
         }
+    }
+
+    fn deselect_test(&self, _id: &UnitName) -> Result<(), UnitDeselectError> {
+        unimplemented!();
+    }
+
+    fn deselect_interface(&self, _id: &UnitName) -> Result<(), UnitDeselectError> {
+        unimplemented!();
+    }
+
+    fn deselect_jig(&self, id: &UnitName) -> Result<(), UnitDeselectError> {
+        // If the specified jig isn't the current jig, then there's nothing to do.
+        let mut current_jig_opt = self.current_jig.borrow_mut();
+
+        let current_jig = match *current_jig_opt {
+            None => return Ok(()),
+            Some(ref s) => {
+                let current_jig = s.borrow();
+                if current_jig.id() != id {
+                    return Ok(());
+                }
+                s.clone()
+            }
+        };
+
+        // If there is a default scenario, make sure it's deselected.
+        if let Some(new_scenario_id) = current_jig.borrow().default_scenario().clone() {
+            self.deselect(&new_scenario_id, "jig is deselecting");
+        }
+
+        current_jig.borrow_mut().deselect()?;
+        *current_jig_opt = None;
+        Ok(())
+    }
+
+    fn deselect_scenario(&self, id: &UnitName) -> Result<(), UnitDeselectError> {
+        // If the specified scenario isn't the current scenario, then there's nothing to do.
+        match *self.current_scenario.borrow() {
+            None => return Ok(()),
+            Some(ref s) => {
+                let current_scenario = s.borrow();
+                if current_scenario.id() != id {
+                    return Ok(());
+                }
+            }
+        }
+        if let Some(ref old_scenario) = self.current_scenario.borrow_mut().take() {
+            old_scenario.borrow_mut().deselect()?;
+        }
+        Ok(())
     }
 
     pub fn activate(&self, id: &UnitName) {
@@ -251,82 +366,8 @@ impl UnitManager {
         }
     }
 
-    pub fn deactivate(&self, id: &UnitName, reason: &str) {
-        let result = match *id.kind() {
-            UnitKind::Interface => self.deactivate_interface(id),
-            UnitKind::Jig => self.deactivate_jig(id),
-            UnitKind::Scenario => self.deactivate_scenario(id),
-            UnitKind::Test => self.deactivate_test(id),
-            UnitKind::Internal => Ok(()),
-        };
-        match result {
-            Ok(_) => self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_deactivate_success(id, reason.to_owned()))),
-            Err(e) =>
-                self.bc.broadcast(
-                        &UnitEvent::Status(UnitStatusEvent::new_deactivate_failure(id, format!("unable to deactivate: {}", e)))),
-        }
-    }
 
-    pub fn deactivate_interface(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
-        let interfaces = self.interfaces.borrow();
-        match interfaces.get(id) {
-            None => return Err(UnitDeactivateError::UnitNotFound),
-            Some(interface) => interface.borrow_mut().deactivate(),
-        }
-    }
-
-    pub fn deactivate_test(&self, _id: &UnitName) -> Result<(), UnitDeactivateError> {
-        unimplemented!();
-    }
-
-    pub fn deactivate_scenario(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
-        let mut current_scenario_opt = self.current_scenario.borrow_mut();
-
-        // If the specified jig isn't the current jig, then there's nothing to do.
-        match *current_scenario_opt {
-            None => return Ok(()),
-            Some(ref s) => {
-                let current_scenario = s.borrow();
-                if current_scenario.id() != id {
-                    return Ok(());
-                }
-            }
-        }
-
-        let scenario_rc = current_scenario_opt.take().unwrap();
-        scenario_rc.borrow_mut().deactivate()?;
-        Ok(())
-    }
-
-    pub fn deactivate_jig(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
-        let mut current_jig_opt = self.current_jig.borrow_mut();
-
-        // If the specified jig isn't the current jig, then there's nothing to do.
-        match *current_jig_opt {
-            None => return Err(UnitDeactivateError::UnitNotFound),
-            Some(ref s) => {
-                let current_jig = s.borrow();
-                if current_jig.id() != id {
-                    return Err(UnitDeactivateError::UnitNotFound);
-                }
-            }
-        }
-
-        let jig_rc = current_jig_opt.take().unwrap();
-        jig_rc.borrow_mut().deactivate()?;
-
-        // Also deselect the current scenario, if it's not empty.
-        let scenario_id_to_deactivate = match *self.current_scenario.borrow() {
-            None => None,
-            Some(ref scenario_rc) => Some(scenario_rc.borrow().id().clone()),
-        };
-        if let Some(ref scenario_id) = scenario_id_to_deactivate {
-            self.deactivate(scenario_id, "jig is deactivating");
-        }
-        Ok(())
-    }
-
-    pub fn activate_interface(&self, id: &UnitName) -> Result<(), UnitActivateError> {
+    fn activate_interface(&self, id: &UnitName) -> Result<(), UnitActivateError> {
         let interface = match self.interfaces.borrow().get(id) {
             Some(i) => i.clone(),
             None => return Err(UnitActivateError::UnitNotFound),
@@ -341,7 +382,7 @@ impl UnitManager {
     /// Set the new jig as "Active".
     /// If there is already an "Active" jig, then deactivate it.
     /// Only do so if there aren't any other valid, active jigs.
-    pub fn activate_jig(&self, id: &UnitName) -> Result<(), UnitActivateError> {
+    fn activate_jig(&self, id: &UnitName) -> Result<(), UnitActivateError> {
         let new_jig = match self.jigs.borrow().get(id) {
             Some(s) => s.clone(),
             None => return Err(UnitActivateError::UnitNotFound),
@@ -367,7 +408,7 @@ impl UnitManager {
         Ok(())
     }
 
-    pub fn activate_scenario(&self, id: &UnitName) -> Result<(), UnitActivateError> {
+    fn activate_scenario(&self, id: &UnitName) -> Result<(), UnitActivateError> {
         let new_scenario = match self.scenarios.borrow().get(id) {
             Some(s) => s.clone(),
             None => return Err(UnitActivateError::UnitNotFound),
@@ -387,41 +428,89 @@ impl UnitManager {
         Ok(())
     }
 
-    pub fn activate_test(&self, _id: &UnitName) -> Result<(), UnitActivateError> {
+    fn activate_test(&self, _id: &UnitName) -> Result<(), UnitActivateError> {
         unimplemented!();
     }
 
-    pub fn remove_interface(&self, id: &UnitName) {
+    pub fn deactivate(&self, id: &UnitName, reason: &str) {
+        self.deselect(id, reason);
+        let result = match *id.kind() {
+            UnitKind::Interface => self.deactivate_interface(id),
+            UnitKind::Jig => self.deactivate_jig(id),
+            UnitKind::Scenario => self.deactivate_scenario(id),
+            UnitKind::Test => self.deactivate_test(id),
+            UnitKind::Internal => Ok(()),
+        };
+        match result {
+            Ok(_) => self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_deactivate_success(id, reason.to_owned()))),
+            Err(e) =>
+                self.bc.broadcast(
+                        &UnitEvent::Status(UnitStatusEvent::new_deactivate_failure(id, format!("unable to deactivate: {}", e)))),
+        }
+    }
+
+    fn deactivate_interface(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
+        let interfaces = self.interfaces.borrow();
+        match interfaces.get(id) {
+            None => return Err(UnitDeactivateError::UnitNotFound),
+            Some(interface) => interface.borrow_mut().deactivate(),
+        }
+    }
+
+    fn deactivate_test(&self, _id: &UnitName) -> Result<(), UnitDeactivateError> {
+        unimplemented!();
+    }
+
+    fn deactivate_scenario(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
+        let mut current_scenario_opt = self.current_scenario.borrow_mut();
+
+        // If the specified scenario isn't the current scenario, then there's nothing to do.
+        match *current_scenario_opt {
+            None => return Ok(()),
+            Some(ref s) => {
+                let current_scenario = s.borrow();
+                if current_scenario.id() != id {
+                    return Ok(());
+                }
+            }
+        }
+
+        let scenario_rc = current_scenario_opt.take().unwrap();
+        scenario_rc.borrow_mut().deactivate()?;
+        Ok(())
+    }
+
+    fn deactivate_jig(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
+        Ok(())
+    }
+
+    pub fn unload(&self, id: &UnitName) {
+        self.deselect(id, "unloading");
+        match *id.kind() {
+            UnitKind::Interface => self.unload_interface(id),
+            UnitKind::Jig => self.unload_jig(id),
+            UnitKind::Scenario => self.unload_scenario(id),
+            UnitKind::Test => self.unload_test(id),
+            UnitKind::Internal => (),
+        }
+    }
+    
+    fn unload_interface(&self, id: &UnitName) {
         self.interfaces.borrow_mut().remove(id);
     }
 
-    pub fn remove_jig(&self, id: &UnitName) {
+    fn unload_jig(&self, id: &UnitName) {
         self.jigs.borrow_mut().remove(id);
     }
 
-    pub fn remove_test(&self, id: &UnitName) {
+    fn unload_test(&self, id: &UnitName) {
         self.tests.borrow_mut().remove(id);
     }
 
-    pub fn remove_scenario(&self, id: &UnitName) {
+    fn unload_scenario(&self, id: &UnitName) {
         self.scenarios.borrow_mut().remove(id);
     }
 
-/*
-    pub fn get_jig_named(&self, id: &UnitName) -> Option<Rc<RefCell<Jig>>> {
-        match self.jigs.borrow().get(id) {
-            None => None,
-            Some(ref s) => Some(*s.clone())
-        }
-    }
-
-    pub fn get_interface_named(&self, id: &UnitName) -> Option<Rc<RefCell<Interface>>> {
-        match self.interfaces.borrow().get(id) {
-            None => None,
-            Some(ref s) => Some(*s.clone())
-        }
-    }
-*/
     pub fn get_scenario_named(&self, id: &UnitName) -> Option<Rc<RefCell<Scenario>>> {
         match self.scenarios.borrow().get(id) {
             None => None,
@@ -509,6 +598,25 @@ impl UnitManager {
             ManagerControlMessageContents::Unimplemented(ref verb, ref remainder) => {
                 self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unimplemented verb: {} (args: {})", verb, remainder))));
             },
+            ManagerControlMessageContents::Start(ref scenario_name_opt) => {
+                let scenario_rc = if let Some(ref scenario_name) = *scenario_name_opt {
+                    match self.scenarios.borrow().get(scenario_name) {
+                        None => {
+                            self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unable to find scenario {} to start it", scenario_name))));
+                            return;
+                        },
+                        Some(s) => s.clone(),
+                    }
+                } else {
+                    match *self.current_scenario.borrow() {
+                        None => {
+                            self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), "no scenario selected to start".to_owned())));
+                            return;
+                        },
+                        Some(ref s) => s.clone(),
+                    }
+                };
+            }
         }
     }
 

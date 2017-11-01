@@ -14,7 +14,7 @@ use self::dependy::{Dependy, Dependency};
 
 use config::Config;
 use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason,
-           UnitName};
+           UnitName, UnitSelectError, UnitDeselectError};
 use unitmanager::UnitManager;
 use units::test::Test;
 
@@ -282,6 +282,14 @@ impl Scenario {
 
     pub fn id(&self) -> &UnitName {
         &self.id
+    }
+
+    pub fn select(&self) -> Result<(), UnitSelectError> {
+        Ok(())
+    }
+
+    pub fn deselect(&self) -> Result<(), UnitDeselectError> {
+        Ok(())
     }
 
     pub fn activate(&self) -> Result<(), UnitActivateError> {

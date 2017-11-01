@@ -24,11 +24,16 @@ pub enum UnitStatus {
     /// The unit file reported that it was not compatible
     Incompatible(String /* reason */),
 
+    /// The unit file has been loaded from disk, and may be selected.
+    Loaded,
+
     /// The unit has been selected, and may be made active later on.
+    /// For some unit types (e.g. Jig, Scenario), only one unit may be
+    /// Selected at a time.
     Selected,
 
     /// The unit has been deselected (but is still loaded, and may be selected later)
-    Deselected,
+    Deselected(String /* reason */),
 
     /// The unit is currently in use
     Active,
@@ -64,8 +69,9 @@ impl fmt::Display for UnitStatus {
             &UnitStatus::LoadStarted(ref path) => write!(f, "Load started {}", path.to_string_lossy()),
             &UnitStatus::LoadFailed(ref x) => write!(f, "Load failed: {}", x),
             &UnitStatus::Incompatible(ref x) => write!(f, "Incompatible: {}", x),
+            &UnitStatus::Loaded => write!(f, "Loaded"),
             &UnitStatus::Selected => write!(f, "Selected"),
-            &UnitStatus::Deselected => write!(f, "Deselected"),
+            &UnitStatus::Deselected(ref reason) => write!(f, "Deselected: {}", reason),
             &UnitStatus::Active => write!(f, "Active"),
             &UnitStatus::ActivationFailed(ref reason) => write!(f, "Activation failed: {}", reason),
             &UnitStatus::DeactivatedSuccessfully(ref x) => {
@@ -138,6 +144,13 @@ impl UnitStatusEvent {
         }
     }
 
+    pub fn new_loaded(name: &UnitName) -> UnitStatusEvent {
+        UnitStatusEvent {
+            name: name.clone(),
+            status: UnitStatus::Loaded,
+        }
+    }
+
     pub fn new_load_started(name: &UnitName, path: &PathBuf) -> UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
@@ -194,10 +207,10 @@ impl UnitStatusEvent {
         }
     }
 
-    pub fn new_deselected(name: &UnitName) -> UnitStatusEvent {
+    pub fn new_deselected(name: &UnitName, msg: String) -> UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
-            status: UnitStatus::Deselected,
+            status: UnitStatus::Deselected(msg),
         }
     }
 

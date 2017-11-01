@@ -50,8 +50,7 @@ macro_rules! process_if {
     }
 }
 
-//    select_and_activate!(dirty_interfaces, interface_descriptions, select_interface, activate_interface);
-macro_rules! select_units_for_activation {
+macro_rules! load_units_for_activation {
     ($slf:ident, $statuses:ident, $dirty:ident, $descriptions:ident, $select:ident) => {
         {
             let mut to_remove = vec![];
@@ -76,10 +75,11 @@ macro_rules! select_units_for_activation {
     }
 }
 
-macro_rules! activate_units {
+macro_rules! select_and_activate_units {
     ($slf:ident, $dirty:ident) => {
         {
             for (id, _) in $slf.$dirty.borrow().iter() {
+                $slf.unit_manager.borrow_mut().select(id);
                 $slf.unit_manager.borrow_mut().activate(id);
             }
             $slf.$dirty.borrow_mut().clear();
@@ -87,7 +87,7 @@ macro_rules! activate_units {
     }
 }
 
-macro_rules! select_units {
+macro_rules! load_units {
     ($slf:ident, $statuses:ident, $dirty:ident, $descriptions:ident, $select:ident) => {
         for (id, _) in $slf.$dirty.borrow().iter() {
             match $statuses.get(id).unwrap() {
@@ -216,49 +216,49 @@ impl UnitLibrary {
         for (id, _) in self.dirty_jigs.borrow().iter() {
             if let &UnitStatus::UnloadStarted(_) = statuses.get(id).unwrap() {
                 self.jig_descriptions.borrow_mut().remove(id);
-                self.unit_manager.borrow_mut().remove_jig(id);
+                self.unit_manager.borrow_mut().unload(id);
                 statuses.remove(id);
             }
         }
         for (id, _) in self.dirty_tests.borrow().iter() {
             if let &UnitStatus::UnloadStarted(_) = statuses.get(id).expect("Unable to find status in dirty test list") {
                 self.test_descriptions.borrow_mut().remove(id);
-                self.unit_manager.borrow_mut().remove_test(id);
+                self.unit_manager.borrow_mut().unload(id);
                 statuses.remove(id);
             }
         }
         for (id, _) in self.dirty_scenarios.borrow().iter() {
             if let &UnitStatus::UnloadStarted(_) = statuses.get(id).expect("Unable to find status in dirty scenario list") {
                 self.scenario_descriptions.borrow_mut().remove(id);
-                self.unit_manager.borrow_mut().remove_scenario(id);
+                self.unit_manager.borrow_mut().unload(id);
                 statuses.remove(id);
             }
         }
         for (id, _) in self.dirty_interfaces.borrow().iter() {
             if let &UnitStatus::UnloadStarted(_) = statuses.get(id).expect("Unable to find status in dirty interface list") {
                 self.interface_descriptions.borrow_mut().remove(id);
-                self.unit_manager.borrow_mut().remove_interface(id);
+                self.unit_manager.borrow_mut().unload(id);
                 statuses.remove(id);
             }
         }
 
         // 4. Load all Jigs that are valid.
-        select_units_for_activation!(self, statuses, dirty_jigs, jig_descriptions, select_jig);
+        load_units_for_activation!(self, statuses, dirty_jigs, jig_descriptions, load_jig);
 
         // 5. Load all Interfaces that are compatible with this Jig.
-        select_units_for_activation!(self, statuses, dirty_interfaces, interface_descriptions, select_interface);
+        load_units_for_activation!(self, statuses, dirty_interfaces, interface_descriptions, load_interface);
 
         // 6. Load all Tests that are compatible with this Jig.
-        select_units!(self, statuses, dirty_tests, test_descriptions, select_test);
+        load_units!(self, statuses, dirty_tests, test_descriptions, load_test);
 
         // 7. Load all Scenarios that are compatible with this Jig.
-        select_units!(self, statuses, dirty_scenarios, scenario_descriptions, select_scenario);
+        load_units!(self, statuses, dirty_scenarios, scenario_descriptions, load_scenario);
 
         // 8. Activate all jigs that were just loaded.
-        activate_units!(self, dirty_jigs);
+        select_and_activate_units!(self, dirty_jigs);
 
         // 9. Activate all interfaces that were just loaded.
-        activate_units!(self, dirty_interfaces);
+        select_and_activate_units!(self, dirty_interfaces);
 
         self.broadcaster.broadcast(&UnitEvent::RescanFinish);
     }

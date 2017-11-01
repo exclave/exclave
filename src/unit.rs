@@ -203,6 +203,28 @@ impl From<DepError<UnitName>> for UnitIncompatibleReason {
     }
 }
 
+pub enum UnitSelectError {
+    /// We tried to select a unit based on its ID, but it wasn't found.
+    UnitNotFound,
+}
+
+impl fmt::Display for UnitSelectError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "couldn't find unit by ID")
+    }
+}
+
+pub enum UnitDeselectError {
+    /// We tried to select a unit based on its ID, but it wasn't found.
+    UnitNotFound,
+}
+
+impl fmt::Display for UnitDeselectError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "couldn't find unit by ID")
+    }
+}
+
 pub enum UnitActivateError {
     /// We tried to activate a unit based on its ID, but it wasn't found.
     UnitNotFound,
@@ -240,7 +262,7 @@ impl fmt::Display for UnitActivateError {
 }
 
 pub enum UnitDeactivateError {
-    /// We tried to activate a unit based on its ID, but it wasn't found.
+    /// We tried to deactivate a unit based on its ID, but it wasn't found.
     UnitNotFound,
 
     /// The unit returned something other than 0.

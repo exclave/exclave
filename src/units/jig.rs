@@ -7,7 +7,7 @@ use std::fs::File;
 
 use config::Config;
 use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason,
-           UnitName};
+           UnitName, UnitSelectError, UnitDeselectError};
 use unitmanager::UnitManager;
 
 use self::systemd_parser::items::DirectiveEntry;
@@ -183,6 +183,14 @@ impl Jig {
 
     pub fn default_scenario(&self) -> &Option<UnitName> {
         &self.default_scenario
+    }
+
+    pub fn select(&self) -> Result<(), UnitSelectError> {
+        Ok(())
+    }
+
+    pub fn deselect(&self) -> Result<(), UnitDeselectError> {
+        Ok(())
     }
 
     pub fn activate(&self) -> Result<(), UnitActivateError> {
