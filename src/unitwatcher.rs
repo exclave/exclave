@@ -22,7 +22,7 @@ impl UnitWatcher {
 
         // Automatically select the best implementation for your platform.
         // You can also access each implementation directly e.g. INotifyWatcher.
-        let watcher: RecommendedWatcher = Watcher::new(watcher_tx, Duration::from_secs(1))
+        let watcher: RecommendedWatcher = Watcher::new(watcher_tx, Duration::from_secs(0))
             .expect("Unable to create file watcher");
 
         // This is a simple loop, but you may want to use more complex logic here,

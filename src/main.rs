@@ -15,11 +15,10 @@ mod terminal;
 mod config;
 mod quiesce;
 
-use unitbroadcaster::{UnitEvent, UnitBroadcaster, LogEntry};
+use unitbroadcaster::{UnitEvent, UnitBroadcaster};
 use unitwatcher::UnitWatcher;
 use unitloader::UnitLoader;
 use unitlibrary::UnitLibrary;
-use unit::UnitName;
 
 use clap::{Arg, App};
 
@@ -80,7 +79,7 @@ fn main() {
 
     let mut quiesce = quiesce::Quiesce::new(Duration::from_secs(1), &unit_broadcaster);
 
-    unit_broadcaster.broadcast(&UnitEvent::Log(LogEntry::new_info(UnitName::internal("main"), format!("Exclave starting up"))));
+    unit_broadcaster.log("main", format!("Exclave initializing"));
 
     use std::fs::File;
     use std::path::Path;

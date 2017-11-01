@@ -409,4 +409,8 @@ impl UnitBroadcaster {
         self.senders.lock().unwrap().push(sender);
         receiver
     }
+
+    pub fn log(&self, section: &str, message: String) {
+        self.broadcast(&UnitEvent::Log(LogEntry::new_info(UnitName::internal(section), message)));
+    }
 }
