@@ -557,6 +557,7 @@ impl UnitManager {
 
     fn unload_scenario(&self, id: &UnitName) {
         self.scenarios.borrow_mut().remove(id);
+        self.broadcast_scenario_list();
     }
 
     pub fn get_scenario_named(&self, id: &UnitName) -> Option<Rc<RefCell<Scenario>>> {
@@ -761,6 +762,13 @@ impl UnitManager {
         }
     }
 
+    fn broadcast_scenario_list(&self) {
+        let msg = ManagerStatusMessage::Scenarios(self.scenarios.borrow().keys().map(|x| x.clone()).collect());
+        for (interface_id, _) in self.interfaces.borrow().iter() {
+            self.send_messages_to(interface_id, vec![msg.clone()]);
+        }
+    }
+
     fn broadcast_selected_scenario(&self) {
         self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(UnitName::internal("unitmanager"), format!("Broadcasting selected scenario"))));
         let opt = self.current_scenario.borrow();
@@ -802,13 +810,13 @@ impl UnitManager {
             None => return,
         };
 
+        self.broadcast_scenario_list();
         let messages = {
             let scenario = scenario.borrow();
             vec![
                 // Rebroadcast the list of scenarios, since that may have changed.
-                ManagerStatusMessage::Scenarios(self.scenarios.borrow().keys().map(|x| x.clone()).collect()),
-                ManagerStatusMessage::Describe(scenario.id().kind().clone(), FieldType::Name, scenario.id().id().clone(), scenario.name().clone()),
-                ManagerStatusMessage::Describe(scenario.id().kind().clone(), FieldType::Description, scenario.id().id().clone(), scenario.description().clone())
+                ManagerStatusMessage::Describe(scenario_id.kind().clone(), FieldType::Name, scenario_id.id().clone(), scenario.name().clone()),
+                ManagerStatusMessage::Describe(scenario_id.kind().clone(), FieldType::Description, scenario_id.id().clone(), scenario.description().clone())
             ]
         };
         for (interface_id, _) in self.interfaces.borrow().iter() {
