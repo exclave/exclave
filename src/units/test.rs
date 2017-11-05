@@ -1,13 +1,15 @@
-extern crate systemd_parser;
 extern crate dependy;
+extern crate humantime;
 extern crate regex;
+extern crate systemd_parser;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::io::Read;
 use std::fs::File;
 
 use self::dependy::Dependency;
+use self::humantime::parse_duration;
 use self::regex::Regex;
 use self::systemd_parser::items::DirectiveEntry;
 
@@ -66,16 +68,16 @@ pub struct TestDescription {
     test_daemon_ready: Option<Regex>,
 
     /// ExecStart: The command to run as part of this test.
-    exec_start: String,
+    exec_start: PathBuf,
 
     /// ExecStopFail: When stopping tests, if the test failed, then this stop command will be run.
-    exec_stop_failure: Option<String>,
+    exec_stop_failure: Option<PathBuf>,
 
     /// ExecStopSuccess: When stopping tests, if the test succeeded, then this stop command will be run.
-    exec_stop_success: Option<String>,
+    exec_stop_success: Option<PathBuf>,
 
     /// working_directory: Directory to run progrms from, if any.
-    working_directory: Option<String>,
+    working_directory: Option<PathBuf>,
 }
 
 impl TestDescription {
@@ -110,7 +112,7 @@ impl TestDescription {
 
             test_daemon_ready: None,
 
-            exec_start: "".to_owned(),
+            exec_start: PathBuf::from(""),
             exec_stop_failure: None,
             exec_stop_success: None,
             working_directory: None,
@@ -162,11 +164,55 @@ impl TestDescription {
                                 None => TestType::Simple,
                             };
                         }
-                        &_ => (),
+                        "WorkingDirectory" => {
+                            test_description.working_directory = match directive.value() {
+                                None => None,
+                                Some(ps) => Some(PathBuf::from(ps)),
+                            }
+                        }
+                        "ExecStart" => {
+                            test_description.exec_start = match directive.value() {
+                                None => return Err(UnitDescriptionError::MissingValue("Test".to_owned(), "ExecStart".to_owned())),
+                                Some(s) => PathBuf::from(s),
+                            }
+                        }
+                        "Timeout" => {
+                            test_description.timeout = match directive.value() {
+                                None => None,
+                                Some(s) => Some(parse_duration(s)?),
+                            }
+                        }
+                        "ExecStopSuccess" => {
+                            test_description.exec_stop_success = match directive.value() {
+                                None => None,
+                                Some(s) => Some(PathBuf::from(s)),
+                            }
+                        }
+                        "ExecStopSuccessTimeout" => {
+                            test_description.exec_stop_success_timeout = match directive.value() {
+                                None => None,
+                                Some(s) => Some(parse_duration(s)?),
+                            }
+                        }
+                        "ExecStopFailure" => {
+                            test_description.exec_stop_failure = match directive.value() {
+                                None => None,
+                                Some(s) => Some(PathBuf::from(s)),
+                            }
+                        }
+                        "ExecStopFailureTimeout" => {
+                            test_description.exec_stop_failure_timeout = match directive.value() {
+                                None => None,
+                                Some(s) => Some(parse_duration(s)?),
+                            }
+                        }                        &_ => (),
                     }
                 }
                 &_ => (),
             }
+        }
+        if test_description.exec_start.to_string_lossy() == "" {
+            return Err(UnitDescriptionError::MissingValue("Test".to_owned(), "ExecStart".to_owned()));
         }
         Ok(test_description)
     }

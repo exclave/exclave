@@ -1,4 +1,5 @@
 extern crate dependy;
+extern crate humantime;
 extern crate systemd_parser;
 
 use std::cell::RefCell;
@@ -9,8 +10,9 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
-use self::systemd_parser::items::DirectiveEntry;
 use self::dependy::{Dependy, Dependency};
+use self::humantime::parse_duration;
+use self::systemd_parser::items::DirectiveEntry;
 
 use config::Config;
 use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason,
@@ -77,6 +79,9 @@ pub struct ScenarioDescription {
     /// A default working directory to start from.  Overrides Jig and global config paths.
     working_directory: Option<PathBuf>,
 
+    /// A preflight command to run before the scenario starts.  A failure here will prevent the test from running.
+    exec_start: Option<String>,
+
     /// A command to run when a scenario completes successfully.
     exec_stop_success: Option<String>,
 
@@ -115,6 +120,8 @@ impl ScenarioDescription {
             timeout: None,
 
             working_directory: None,
+
+            exec_start: None,
             exec_stop_success: None,
             exec_stop_success_timeout: None,
             exec_stop_failure: None,
@@ -154,6 +161,42 @@ impl ScenarioDescription {
                             scenario_description.assumptions = match directive.value() {
                                 Some(s) => UnitName::from_list(s, "test")?,
                                 None => vec![],
+                            }
+                        }
+                        "ExecStart" => {
+                            scenario_description.exec_start = match directive.value() {
+                                None => None,
+                                Some(s) => Some(s.to_owned()),
+                            }
+                        }
+                        "Timeout" => {
+                            scenario_description.timeout = match directive.value() {
+                                None => None,
+                                Some(s) => Some(parse_duration(s)?),
+                            }
+                        }
+                        "ExecStopSuccess" => {
+                            scenario_description.exec_stop_success = match directive.value() {
+                                None => None,
+                                Some(s) => Some(s.to_owned()),
+                            }
+                        }
+                        "ExecStopSuccessTimeout" => {
+                            scenario_description.exec_stop_success_timeout = match directive.value() {
+                                None => None,
+                                Some(s) => Some(parse_duration(s)?),
+                            }
+                        }
+                        "ExecStopFailure" => {
+                            scenario_description.exec_stop_failure = match directive.value() {
+                                None => None,
+                                Some(s) => Some(s.to_owned()),
+                            }
+                        }
+                        "ExecStopFailureTimeout" => {
+                            scenario_description.exec_stop_failure_timeout = match directive.value() {
+                                None => None,
+                                Some(s) => Some(parse_duration(s)?),
                             }
                         }
                         &_ => (),

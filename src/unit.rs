@@ -1,4 +1,5 @@
 extern crate dependy;
+extern crate humantime;
 extern crate regex;
 extern crate runny;
 extern crate systemd_parser;
@@ -8,6 +9,7 @@ use std::path::Path;
 use std::io;
 
 use self::dependy::DepError;
+use self::humantime::DurationError;
 use self::runny::RunnyError;
 use self::runny::running::RunningError;
 use self::systemd_parser::errors::ParserError;
@@ -299,6 +301,7 @@ pub enum UnitDescriptionError {
     FileOpenError(io::Error),
     ParseError(ParserError),
     RegexError(self::regex::Error),
+    HumantimeError(DurationError),
     InvalidValue(
         String,      // Section name
         String,      // Key name
@@ -331,6 +334,12 @@ impl From<self::regex::Error> for UnitDescriptionError {
     }
 }
 
+impl From<DurationError> for UnitDescriptionError {
+    fn from(error: DurationError) -> Self {
+        UnitDescriptionError::HumantimeError(error)
+    }
+}
+
 impl fmt::Display for UnitDescriptionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use std::error::Error;
@@ -346,6 +355,9 @@ impl fmt::Display for UnitDescriptionError {
             }
             &UnitDescriptionError::ParseError(ref e) => {
                 write!(f, "syntax error: {}", e.description())
+            }
+            &UnitDescriptionError::HumantimeError(ref e) => {
+                write!(f, "time parse error: {}", e.description())
             }
             &UnitDescriptionError::RegexError(ref e) => write!(f, "unable to parse regex: {}", e),
             &UnitDescriptionError::MissingValue(ref sec, ref key) => {
