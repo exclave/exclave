@@ -1,7 +1,7 @@
 extern crate runny;
 extern crate systemd_parser;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::io::Read;
 use std::fs::File;
 
@@ -28,7 +28,7 @@ pub struct JigDescription {
     default_scenario: Option<UnitName>,
 
     /// The default directory for programs on this jig, if any
-    working_directory: Option<String>,
+    working_directory: Option<PathBuf>,
 
     /// A program to run to determine if this jig is compatible, if any
     test_program: Option<String>,
@@ -66,6 +66,12 @@ impl JigDescription {
                     "Name" => jig_description.name = directive.value().unwrap_or("").to_owned(),
                     "Description" => {
                         jig_description.description = directive.value().unwrap_or("").to_owned()
+                    }
+                    "WorkingDirectory" => {
+                        jig_description.working_directory = match directive.value() {
+                            None => None,
+                            Some(ps) => Some(PathBuf::from(ps)),
+                        }
                     }
                     "TestFile" => {
                         jig_description.test_file = match directive.value() {
@@ -157,6 +163,7 @@ pub struct Jig {
     name: String,
     description: String,
     default_scenario: Option<UnitName>,
+    working_directory: Option<PathBuf>,
 }
 
 impl Jig {
@@ -166,6 +173,7 @@ impl Jig {
             name: desc.name.clone(),
             description: desc.description.clone(),
             default_scenario: desc.default_scenario.clone(),
+            working_directory: desc.working_directory.clone(),
         }
     }
 
@@ -183,6 +191,10 @@ impl Jig {
 
     pub fn default_scenario(&self) -> &Option<UnitName> {
         &self.default_scenario
+    }
+
+    pub fn working_directory(&self) -> &Option<PathBuf> {
+        &self.working_directory
     }
 
     pub fn select(&self) -> Result<(), UnitSelectError> {

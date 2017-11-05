@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -74,6 +74,9 @@ pub struct ScenarioDescription {
     /// The maximum duration, if any, for this scenario
     timeout: Option<Duration>,
 
+    /// A default working directory to start from.  Overrides Jig and global config paths.
+    working_directory: Option<PathBuf>,
+
     /// A command to run when a scenario completes successfully.
     exec_stop_success: Option<String>,
 
@@ -111,6 +114,7 @@ impl ScenarioDescription {
 
             timeout: None,
 
+            working_directory: None,
             exec_stop_success: None,
             exec_stop_success_timeout: None,
             exec_stop_failure: None,
@@ -132,6 +136,12 @@ impl ScenarioDescription {
                             scenario_description.jigs = match directive.value() {
                                 Some(s) => UnitName::from_list(s, "jig")?,
                                 None => vec![],
+                            }
+                        }
+                        "WorkingDirectory" => {
+                            scenario_description.working_directory = match directive.value() {
+                                None => None,
+                                Some(ps) => Some(PathBuf::from(ps)),
                             }
                         }
                         "Tests" => {
@@ -242,6 +252,7 @@ pub struct Scenario {
     description: String,
     test_sequence: Vec<Rc<RefCell<Test>>>,
     tests: HashMap<UnitName, Rc<RefCell<Test>>>,
+    working_directory: Option<PathBuf>,
 }
 
 impl Scenario {
@@ -265,6 +276,7 @@ impl Scenario {
             description: desc.description.clone(),
             tests: tests,
             test_sequence: test_sequence,
+            working_directory: desc.working_directory.clone(),
         }
     }
 
@@ -294,9 +306,26 @@ impl Scenario {
 
     pub fn activate(
         &self,
-        _manager: &UnitManager,
-        _config: &Config,
+        manager: &UnitManager,
+        config: &Config,
     ) -> Result<(), UnitActivateError> {
+
+        // Re-assign our working directory.
+        let mut wd = None;
+        if let Some(ref d) = self.working_directory {
+            wd = Some(d.clone());
+        }
+        if wd.is_none() && manager.get_current_jig().is_some() {
+            let d = manager.get_current_jig().unwrap();
+            let d = d.borrow();
+            if d.working_directory().is_some() {
+                wd = d.working_directory().clone();
+            }
+        }
+        if wd.is_none() {
+            wd = Some(config.working_directory().clone())
+        };
+
         Ok(())
     }
 
