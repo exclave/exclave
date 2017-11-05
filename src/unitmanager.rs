@@ -210,6 +210,10 @@ impl UnitManager {
         self.control_sender.clone()
     }
 
+    pub fn get_broadcast_channel(&self) -> UnitBroadcaster {
+        self.bc.clone()
+    }
+
     pub fn load_interface(&self, description: &InterfaceDescription) -> Result<UnitName, ()> {
         load!(self, interfaces, description)
     }

@@ -8,6 +8,8 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::mpsc::Sender;
+use std::thread;
 use std::time::Duration;
 
 use self::dependy::{Dependy, Dependency};
@@ -17,7 +19,8 @@ use self::systemd_parser::items::DirectiveEntry;
 use config::Config;
 use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason,
            UnitName, UnitSelectError, UnitDeselectError};
-use unitmanager::UnitManager;
+use unitbroadcaster::UnitBroadcaster;
+use unitmanager::{ManagerControlMessage, UnitManager};
 use units::test::Test;
 
 struct AssumptionDependency {
@@ -369,7 +372,15 @@ impl Scenario {
             wd = Some(config.working_directory().clone())
         };
 
+        let ctrl = manager.get_control_channel();
+        let bc = manager.get_broadcast_channel();
+        thread::spawn(move || Self::scenario_thread(wd, ctrl, bc));
+
         Ok(())
+    }
+
+    fn scenario_thread(_wd: Option<PathBuf>, _ctrl: Sender<ManagerControlMessage>, _bc: UnitBroadcaster) {
+
     }
 
     pub fn deactivate(&self) -> Result<(), UnitDeactivateError> {
