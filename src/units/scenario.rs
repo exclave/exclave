@@ -57,6 +57,7 @@ impl Dependency<UnitName> for AssumptionDependency {
 }
 
 /// A struct defining an in-memory representation of a .scenario file
+#[derive(Clone)]
 pub struct ScenarioDescription {
     /// The id of the unit (including the kind)
     id: UnitName,
@@ -294,8 +295,7 @@ impl ScenarioDescription {
 
 pub struct Scenario {
     id: UnitName,
-    name: String,
-    description: String,
+    description: ScenarioDescription,
     test_sequence: Vec<Rc<RefCell<Test>>>,
     tests: HashMap<UnitName, Rc<RefCell<Test>>>,
     working_directory: Option<PathBuf>,
@@ -318,8 +318,7 @@ impl Scenario {
 
         Scenario {
             id: desc.id.clone(),
-            name: desc.name.clone(),
-            description: desc.description.clone(),
+            description: desc.clone(),
             tests: tests,
             test_sequence: test_sequence,
             working_directory: desc.working_directory.clone(),
@@ -374,12 +373,14 @@ impl Scenario {
 
         let ctrl = manager.get_control_channel();
         let bc = manager.get_broadcast_channel();
-        thread::spawn(move || Self::scenario_thread(wd, ctrl, bc));
+        let sc = self.description.clone();
+        thread::spawn(move || Self::scenario_thread(wd, ctrl, bc, sc));
 
         Ok(())
     }
 
-    fn scenario_thread(_wd: Option<PathBuf>, _ctrl: Sender<ManagerControlMessage>, _bc: UnitBroadcaster) {
+    /// Run the scenario in a separate thread.  Communicates with the main unit broadcaster by passing messages.
+    fn scenario_thread(_wd: Option<PathBuf>, _ctrl: Sender<ManagerControlMessage>, _bc: UnitBroadcaster, _scenario: ScenarioDescription) {
 
     }
 
@@ -392,10 +393,10 @@ impl Scenario {
     }
 
     pub fn name(&self) -> &String {
-        &self.name
+        &self.description.name
     }
 
     pub fn description(&self) -> &String {
-        &self.description
+        &self.description.description
     }
 }
