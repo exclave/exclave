@@ -292,7 +292,11 @@ impl Scenario {
         Ok(())
     }
 
-    pub fn activate(&self) -> Result<(), UnitActivateError> {
+    pub fn activate(
+        &self,
+        _manager: &UnitManager,
+        _config: &Config,
+    ) -> Result<(), UnitActivateError> {
         Ok(())
     }
 

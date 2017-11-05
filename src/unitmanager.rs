@@ -452,15 +452,11 @@ impl UnitManager {
 
 
     fn activate_interface(&self, id: &UnitName) -> Result<(), UnitActivateError> {
-        let interface = match self.interfaces.borrow().get(id) {
-            Some(i) => i.clone(),
-            None => return Err(UnitActivateError::UnitNotFound),
-        };
-
         // Activate the interface, which actually starts it up.
-        interface.borrow_mut().activate(self, &*self.cfg.lock().unwrap())?;
-
-        Ok(())
+        match self.interfaces.borrow().get(id) {
+            Some(i) => i.borrow_mut().activate(self, &*self.cfg.lock().unwrap()),
+            None => return Err(UnitActivateError::UnitNotFound),
+        }
     }
 
     /// Set the new jig as "Active".
@@ -490,7 +486,7 @@ impl UnitManager {
                 Err(UnitActivateError::UnitNotSelected)
             } else {
                 // Activate this scenario.
-                s.borrow_mut().activate()
+                s.borrow_mut().activate(self, &*self.cfg.lock().unwrap())
             }
         }
     }
