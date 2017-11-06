@@ -364,12 +364,6 @@ pub enum UnitEvent {
     /// The rescan has finished.
     RescanFinish,
 
-    /// A child program exited.
-    ChildProgramExited(PathBuf /* Command */, i32 /* Result */),
-
-    /// Request that a particular program be terminated.
-    RequestProgramExit(PathBuf /* Command */),
-
     /// A unit made a request to a Manager, which will be passed to the main thread.
     ManagerRequest(ManagerControlMessage),
 

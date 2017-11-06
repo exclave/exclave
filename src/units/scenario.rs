@@ -449,7 +449,7 @@ impl Scenario {
         *self.working_directory.borrow_mut() = wd;
 
         // Cause the scenario to move to the next phase.
-        ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::AdvanceScenario)).ok();
+        ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::AdvanceScenario(0))).ok();
 
         Ok(())
     }
@@ -471,7 +471,7 @@ impl Scenario {
     }
 
     // Given the current state, figure out the next test to run (if any)
-    pub fn advance(&self, ctrl: &Sender<ManagerControlMessage>) {
+    pub fn advance(&self, last_result: i32, ctrl: &Sender<ManagerControlMessage>) {
         let current_state = self.state.borrow().clone();
 
         // Run the test's stop() command if we just ran a test.
@@ -547,7 +547,7 @@ impl Scenario {
         let id = self.id().clone();
         thread::spawn(move || {
             thr_waiter.wait();
-            thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario)).ok();
+            thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(thr_waiter.result()))).ok();
         });
 
         *self.program.borrow_mut() = Some(running);

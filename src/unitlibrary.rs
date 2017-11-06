@@ -260,6 +260,9 @@ impl UnitLibrary {
         // 9. Activate all interfaces that were just loaded.
         select_and_activate_units!(self, dirty_interfaces);
 
+        // 10. Prepare any defaults that need loading (i.e. jigs, scenarios, etc.)
+        self.unit_manager.borrow_mut().refresh_defaults();
+
         self.broadcaster.broadcast(&UnitEvent::RescanFinish);
     }
 

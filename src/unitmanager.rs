@@ -117,7 +117,7 @@ pub enum ManagerControlMessageContents {
     InitialGreeting,
 
     /// Tells the Manager to advance the current scenario.
-    AdvanceScenario,
+    AdvanceScenario(i32 /* result code of last step */),
 
     /// Indicates the child (Interface, Test, etc.) has exited.
     ChildExited,
@@ -469,6 +469,22 @@ impl UnitManager {
         }
     }
 
+    /// If there are unselected defaults, activate them.
+    /// For example, if there is no current Jig, activate the first Jig we find.
+    /// Likewise, if there is no selected Scenario, select the first scenario we find.
+    pub fn refresh_defaults(&self) {
+        // Activate a "random" available jig.
+        if self.current_jig.borrow().is_none() && !self.jigs.borrow().is_empty() {
+            let new_jig_id = self.jigs.borrow().keys().next().unwrap().clone();
+            self.activate(&new_jig_id);
+        }
+
+        // If there is no current scenario, select a random one.
+        if self.current_scenario.borrow().is_none() && !self.scenarios.borrow().is_empty() {
+            let new_scenario_id = self.scenarios.borrow().keys().next().unwrap().clone();
+            self.select(&new_scenario_id);
+        }
+    }
 
     fn activate_interface(&self, id: &UnitName) -> Result<(), UnitActivateError> {
         // Activate the interface, which actually starts it up.
@@ -725,10 +741,10 @@ impl UnitManager {
             ManagerControlMessageContents::ChildExited => {
                 self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_active_failed(sender_name, "Unit unexpectedly exited".to_owned())));
             },
-            ManagerControlMessageContents::AdvanceScenario => {
+            ManagerControlMessageContents::AdvanceScenario(result) => {
                 match *self.current_scenario.borrow() {
                     None => (),
-                    Some(ref current_scenario) => current_scenario.borrow_mut().advance(&self.control_sender),
+                    Some(ref current_scenario) => current_scenario.borrow_mut().advance(result, &self.control_sender),
                 }
             },
             ManagerControlMessageContents::Unimplemented(ref verb, ref remainder) => {

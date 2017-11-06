@@ -104,8 +104,6 @@ impl TerminalInterface {
             UnitEvent::RescanRequest => (),
             UnitEvent::Shutdown => (),
             UnitEvent::ManagerRequest(_) => (),
-            UnitEvent::ChildProgramExited(_, _) => (),
-            UnitEvent::RequestProgramExit(_) => (),
         }
 
         match self.output_type {
@@ -125,8 +123,6 @@ impl TerminalInterface {
             UnitEvent::Shutdown => println!("Shutting down"),
             UnitEvent::Log(log) => println!("{}", log),
             UnitEvent::ManagerRequest(_) => (),
-            UnitEvent::ChildProgramExited(_, _) => (),
-            UnitEvent::RequestProgramExit(_) => (),
         };
     }
 
