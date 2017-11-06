@@ -87,6 +87,12 @@ pub enum ManagerStatusMessage {
 
     /// A log message from one of the units, or the system itself.
     Log(LogEntry),
+
+    /// Indicates that a test was skipped for some reason.
+    Skipped(UnitName, String /* reason */),
+
+    /// Sent when a scenario has finished running.
+    Finished(UnitName /* Scenario name */, u32 /* Result code */, String /* Reason for finishing */),
 }
 
 /// Messages for Unit -> Library communication
@@ -110,7 +116,10 @@ pub enum ManagerControlMessageContents {
     /// Sent to a unit when it is first loaded, including "HELLO" messages.
     InitialGreeting,
 
-    /// Indicates the child object terminated unexpectedly.
+    /// Tells the Manager to advance the current scenario.
+    AdvanceScenario,
+
+    /// Indicates the child (Interface, Test, etc.) has exited.
     ChildExited,
 
     /// Client sent an unimplemented message.
@@ -124,6 +133,12 @@ pub enum ManagerControlMessageContents {
 
     /// Start running a scenario, or the default scenario if None
     StartScenario(Option<UnitName>),
+
+    /// Indicates that a test was skipped, and why.
+    Skip(UnitName, String /* reason */),
+
+    /// Indicates that a scenario has finished, and how many tests passed.
+    Finished(u32 /* Finish code */, String /* Informative message */),
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
@@ -252,7 +267,7 @@ impl UnitManager {
             },
             Err(e) =>
                self.bc.broadcast(
-                    &UnitEvent::Status(UnitStatusEvent::new_select_failed(id, format!("unable to select: {}", e)))),
+                    &UnitEvent::Status(UnitStatusEvent::new_select_failed(id, format!("{}", e)))),
         }
     }
 
@@ -688,7 +703,7 @@ impl UnitManager {
             ManagerControlMessageContents::LogError(ref txt) => self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), txt.clone()))),
             ManagerControlMessageContents::Scenario(ref new_scenario_name) => {
                 if self.get_scenario_named(new_scenario_name).is_some() {
-                    self.activate(new_scenario_name);
+                    self.select(new_scenario_name);
                 } else {
                     self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unable to find scenario {}", new_scenario_name))));
                 }
@@ -709,7 +724,13 @@ impl UnitManager {
             },
             ManagerControlMessageContents::ChildExited => {
                 self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_active_failed(sender_name, "Unit unexpectedly exited".to_owned())));
-            }
+            },
+            ManagerControlMessageContents::AdvanceScenario => {
+                match *self.current_scenario.borrow() {
+                    None => (),
+                    Some(ref current_scenario) => current_scenario.borrow_mut().advance(&self.control_sender),
+                }
+            },
             ManagerControlMessageContents::Unimplemented(ref verb, ref remainder) => {
                 self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unimplemented verb: {} (args: {})", verb, remainder))));
             },
@@ -728,6 +749,12 @@ impl UnitManager {
                 };
 
                 self.activate(&scenario_name);
+            },
+            ManagerControlMessageContents::Skip(ref test_name, ref reason) => {
+                self.broadcast_skipped(test_name, reason);
+            }
+            ManagerControlMessageContents::Finished(code, ref message) => {
+                self.broadcast_finished(sender_name, code, message);
             }
         }
     }
@@ -892,6 +919,20 @@ impl UnitManager {
                 ManagerStatusMessage::Describe(unit_id.clone(), FieldType::Description, unit.description().clone())
             ];
             self.send_messages_to(interface_id, messages);
+        }
+    }
+
+    fn broadcast_skipped(&self, unit_id: &UnitName, reason: &String) {
+        let msg = ManagerStatusMessage::Skipped(unit_id.clone(), reason.clone());
+        for (interface_id, _) in self.interfaces.borrow().iter() {
+            self.send_messages_to(interface_id, vec![msg.clone()]);
+        }
+    }
+
+    fn broadcast_finished(&self, unit_id: &UnitName, code: u32, message: &String) {
+        let msg = ManagerStatusMessage::Finished(unit_id.clone(), code, message.clone());
+        for (interface_id, _) in self.interfaces.borrow().iter() {
+            self.send_messages_to(interface_id, vec![msg.clone()]);
         }
     }
 

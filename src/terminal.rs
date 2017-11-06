@@ -14,6 +14,8 @@ pub enum TerminalOutputType {
     None,
 }
 
+const MAX_LOG_HISTORY: usize = 25;
+
 pub struct TerminalInterface {
     /// A list of known categories, and their statuses.
     category_status: BTreeMap<UnitKind, UnitCategoryStatus>,
@@ -57,7 +59,7 @@ impl TerminalInterface {
                 terminal: stdout,
                 last_line_count: 0,
                 logs: vec![],
-                log_history: 10,
+                log_history: MAX_LOG_HISTORY,
             };
 
             while let Ok(event) = receiver.recv() {
@@ -102,6 +104,8 @@ impl TerminalInterface {
             UnitEvent::RescanRequest => (),
             UnitEvent::Shutdown => (),
             UnitEvent::ManagerRequest(_) => (),
+            UnitEvent::ChildProgramExited(_, _) => (),
+            UnitEvent::RequestProgramExit(_) => (),
         }
 
         match self.output_type {
@@ -121,6 +125,8 @@ impl TerminalInterface {
             UnitEvent::Shutdown => println!("Shutting down"),
             UnitEvent::Log(log) => println!("{}", log),
             UnitEvent::ManagerRequest(_) => (),
+            UnitEvent::ChildProgramExited(_, _) => (),
+            UnitEvent::RequestProgramExit(_) => (),
         };
     }
 

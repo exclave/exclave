@@ -1,27 +1,30 @@
 extern crate dependy;
 extern crate humantime;
+extern crate runny;
 extern crate systemd_parser;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read};
+use std::sync::mpsc::Sender;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::mpsc::Sender;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use self::dependy::{Dependy, Dependency};
-use self::humantime::parse_duration;
+use self::humantime::{parse_duration, DurationError};
+use self::runny::Runny;
+use self::runny::running::Running;
 use self::systemd_parser::items::DirectiveEntry;
 
 use config::Config;
 use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason,
            UnitName, UnitSelectError, UnitDeselectError};
-use unitbroadcaster::UnitBroadcaster;
-use unitmanager::{ManagerControlMessage, UnitManager};
-use units::test::Test;
+use unitmanager::{ManagerControlMessage, ManagerControlMessageContents,
+                  UnitManager};
+use units::test::{Test, TestState};
 
 struct AssumptionDependency {
     name: UnitName,
@@ -86,6 +89,9 @@ pub struct ScenarioDescription {
     /// A preflight command to run before the scenario starts.  A failure here will prevent the test from running.
     exec_start: Option<String>,
 
+    /// The maximum amount of time to allow the "start" script to run for.
+    exec_start_timeout: Option<Duration>,
+
     /// A command to run when a scenario completes successfully.
     exec_stop_success: Option<String>,
 
@@ -126,6 +132,7 @@ impl ScenarioDescription {
             working_directory: None,
 
             exec_start: None,
+            exec_start_timeout: None,
             exec_stop_success: None,
             exec_stop_success_timeout: None,
             exec_stop_failure: None,
@@ -173,10 +180,16 @@ impl ScenarioDescription {
                                 Some(s) => Some(s.to_owned()),
                             }
                         }
+                        "ExecStartTimeout" => {
+                            scenario_description.exec_start_timeout = match directive.value() {
+                                None => None,
+                                Some(s) => Some(Self::parse_time(s)?),
+                            }
+                        }
                         "Timeout" => {
                             scenario_description.timeout = match directive.value() {
                                 None => None,
-                                Some(s) => Some(parse_duration(s)?),
+                                Some(s) => Some(Self::parse_time(s)?),
                             }
                         }
                         "ExecStopSuccess" => {
@@ -188,7 +201,7 @@ impl ScenarioDescription {
                         "ExecStopSuccessTimeout" => {
                             scenario_description.exec_stop_success_timeout = match directive.value() {
                                 None => None,
-                                Some(s) => Some(parse_duration(s)?),
+                                Some(s) => Some(Self::parse_time(s)?),
                             }
                         }
                         "ExecStopFailure" => {
@@ -200,7 +213,7 @@ impl ScenarioDescription {
                         "ExecStopFailureTimeout" => {
                             scenario_description.exec_stop_failure_timeout = match directive.value() {
                                 None => None,
-                                Some(s) => Some(parse_duration(s)?),
+                                Some(s) => Some(Self::parse_time(s)?),
                             }
                         }
                         &_ => (),
@@ -210,6 +223,14 @@ impl ScenarioDescription {
             }
         }
         Ok(scenario_description)
+    }
+
+    fn parse_time(time_str: &str) -> Result<Duration, DurationError> {
+        if let Ok(val) = time_str.parse::<u64>() {
+            Ok(Duration::from_secs(val))
+        } else {
+            parse_duration(time_str)
+        }
     }
 
     pub fn id(&self) -> &UnitName {
@@ -225,7 +246,7 @@ impl ScenarioDescription {
     pub fn is_compatible(&self,
                          manager: &UnitManager,
                          _: &Config)
-                         -> Result<Vec<UnitName>, UnitIncompatibleReason> {
+                         -> Result<(Vec<UnitName>, Dependy<UnitName>), UnitIncompatibleReason> {
         // If there is at least one jig present, ensure that it is loaded.
         if self.jigs.len() > 0 {
             let mut loaded = false;
@@ -249,13 +270,13 @@ impl ScenarioDescription {
                   manager: &UnitManager,
                   config: &Config)
                   -> Result<Scenario, UnitIncompatibleReason> {
-        let test_order = self.is_compatible(manager, config)?;
-        Ok(Scenario::new(self, test_order, manager))
+        let (test_order, graph) = self.is_compatible(manager, config)?;
+        Ok(Scenario::new(self, test_order, manager, graph))
     }
 
     pub fn get_test_order(&self,
                           manager: &UnitManager)
-                          -> Result<Vec<UnitName>, UnitIncompatibleReason> {
+                          -> Result<(Vec<UnitName>, Dependy<UnitName>), UnitIncompatibleReason> {
 
         // Create a new dependency graph
         let mut graph = Dependy::new();
@@ -289,22 +310,65 @@ impl ScenarioDescription {
         }
 
         // let test_order = trimmed_order;
-        Ok(test_order)
+        Ok((test_order, graph))
     }
 }
 
+#[derive(Clone, PartialEq, Debug)]
+enum ScenarioState {
+    /// The scenario has been loaded, and is ready to run.
+    Idle,
+
+    /// The scenario has started, but is waiting for ExecStart to finish
+    PreStart,
+
+    /// The scenario is running, and is on step (u32)
+    Running(usize),
+
+    /// The scenario has succeeded, and is running the ExecStopSuccess step
+    PostSuccess,
+
+    /// The scenario has failed, and is running the ExecStopFailure step
+    PostFailure,
+
+    /// The test has succeeded or failed
+    TestFinished,
+}
+
 pub struct Scenario {
-    id: UnitName,
+    /// A reference to the scenario description that constructed this test.
     description: ScenarioDescription,
+
+    /// A list of tests, in the order in which they will run.
     test_sequence: Vec<Rc<RefCell<Test>>>,
+
+    /// A pointer to the tests that are part of this scenario.
     tests: HashMap<UnitName, Rc<RefCell<Test>>>,
-    working_directory: Option<PathBuf>,
+
+    /// The current state of the scenario, when activated.
+    state: Rc<RefCell<ScenarioState>>,
+
+    /// The current working directory, based on the description, jig, and config.
+    working_directory: Rc<RefCell<Option<PathBuf>>>,
+
+    /// How many tests have failed in this particular run.
+    failures: Rc<RefCell<u32>>,
+
+    /// The dependency graph of tests.
+    graph: Dependy<UnitName>,
+
+    /// When the test was started.
+    start_time: Instant,
+
+    /// The currently-executing program (if any)
+    program: Rc<RefCell<Option<Running>>>,
 }
 
 impl Scenario {
-    pub fn new(desc: &ScenarioDescription,
+    fn new(desc: &ScenarioDescription,
                test_order: Vec<UnitName>,
-               manager: &UnitManager)
+               manager: &UnitManager,
+               graph: Dependy<UnitName>)
                -> Scenario {
 
         let mut tests = HashMap::new();
@@ -317,11 +381,15 @@ impl Scenario {
         }
 
         Scenario {
-            id: desc.id.clone(),
             description: desc.clone(),
             tests: tests,
             test_sequence: test_sequence,
-            working_directory: desc.working_directory.clone(),
+            state: Rc::new(RefCell::new(ScenarioState::Idle)),
+            working_directory: Rc::new(RefCell::new(None)),
+            failures: Rc::new(RefCell::new(0)),
+            graph: graph,
+            start_time: Instant::now(),
+            program: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -338,7 +406,7 @@ impl Scenario {
     }
 
     pub fn id(&self) -> &UnitName {
-        &self.id
+        &self.description.id
     }
 
     pub fn select(&self) -> Result<(), UnitSelectError> {
@@ -350,14 +418,22 @@ impl Scenario {
     }
 
     pub fn activate(
-        &self,
+        &mut self,
         manager: &UnitManager,
         config: &Config,
     ) -> Result<(), UnitActivateError> {
 
+        // We'll communicate to the manager through this pipe.
+        let ctrl = manager.get_control_channel();
+
+        // Start afresh and reset our failure count.
+        *self.failures.borrow_mut() = 0;
+        self.start_time = Instant::now();
+        *self.state.borrow_mut() = ScenarioState::Idle;
+
         // Re-assign our working directory.
         let mut wd = None;
-        if let Some(ref d) = self.working_directory {
+        if let Some(ref d) = self.description.working_directory {
             wd = Some(d.clone());
         }
         if wd.is_none() && manager.get_current_jig().is_some() {
@@ -370,18 +446,12 @@ impl Scenario {
         if wd.is_none() {
             wd = Some(config.working_directory().clone())
         };
+        *self.working_directory.borrow_mut() = wd;
 
-        let ctrl = manager.get_control_channel();
-        let bc = manager.get_broadcast_channel();
-        let sc = self.description.clone();
-        thread::spawn(move || Self::scenario_thread(wd, ctrl, bc, sc));
+        // Cause the scenario to move to the next phase.
+        ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::AdvanceScenario)).ok();
 
         Ok(())
-    }
-
-    /// Run the scenario in a separate thread.  Communicates with the main unit broadcaster by passing messages.
-    fn scenario_thread(_wd: Option<PathBuf>, _ctrl: Sender<ManagerControlMessage>, _bc: UnitBroadcaster, _scenario: ScenarioDescription) {
-
     }
 
     pub fn deactivate(&self) -> Result<(), UnitDeactivateError> {
@@ -398,5 +468,286 @@ impl Scenario {
 
     pub fn description(&self) -> &String {
         &self.description.description
+    }
+
+    // Given the current state, figure out the next test to run (if any)
+    pub fn advance(&self, ctrl: &Sender<ManagerControlMessage>) {
+        let current_state = self.state.borrow().clone();
+
+        // Run the test's stop() command if we just ran a test.
+        match current_state {
+            ScenarioState::Running(step) => {
+                /* XXX Run the test's STOP command */
+//                self.test_sequence[step]
+//                    .stop(&*self.working_directory.lock().unwrap())
+            }
+            _ => (),
+        }
+
+        let new_state = self.find_next_state(current_state, ctrl);
+
+        match new_state {
+            // We generally shouldn't transition to the Idle state.
+            ScenarioState::Idle => (),
+
+            // If we want to run a preroll command and it fails, log it and start the tests.
+            ScenarioState::PreStart => {
+                // Unwrap because we've already validated it exists by setting the state to PreStart.
+                let cmd = &self.description.exec_start.clone().unwrap();
+                self.run_support_cmd(cmd,
+                                     ctrl,
+                                     &self.description.exec_start_timeout,
+                                     "execstart");
+            }
+            ScenarioState::Running(next_step) => {
+                let ref test = self.test_sequence[next_step].borrow();
+                let test_timeout = test.timeout();
+                let test_max_time = self.make_timeout(test_timeout);
+                //test.start(&*self.working_directory.lock().unwrap(), test_max_time);
+            }
+            ScenarioState::PostSuccess => {
+                let cmd = &self.description.exec_stop_success.clone().unwrap();
+                self.run_support_cmd(cmd,
+                                     ctrl,
+                                     &self.description.exec_stop_success_timeout,
+                                     "execstopsuccess");
+            }
+            ScenarioState::PostFailure => {
+                let cmd = &self.description.exec_stop_failure.clone().unwrap();
+                self.run_support_cmd(cmd,
+                                     ctrl,
+                                     &self.description.exec_stop_failure_timeout,
+                                     "execstopfailure");
+            }
+
+            // If we're transitioning to the Finshed state, it means we just finished
+            // running some tests.  Broadcast the result.
+            ScenarioState::TestFinished => self.finish_scenario(ctrl),
+        }
+    }
+
+    /// Run a support command (i.e. ExecStart, ExecStopSuccess, or ExecStopFailure).
+    /// Will emit an AdvanceScenario message upon completion.
+    fn run_support_cmd(&self, cmd: &String, ctrl: &Sender<ManagerControlMessage>, timeout: &Option<Duration>, _testname: &str) {
+        let mut cmd = Runny::new(cmd);
+        if let Some(timeout) = *timeout {
+            cmd.timeout(timeout);
+        }
+        cmd.directory(&*self.working_directory.borrow());
+        let mut running = match cmd.start() {
+            Ok(o) => o,
+            Err(e) => unimplemented!(),
+        };
+
+        self.log_output(ctrl, &mut running);
+
+        // Keep a waiter around in a separate thread to send that AdvanceScenario message upon completion.
+        let thr_waiter = running.waiter();
+        let thr_control = ctrl.clone();
+        let id = self.id().clone();
+        thread::spawn(move || {
+            thr_waiter.wait();
+            thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario)).ok();
+        });
+
+        *self.program.borrow_mut() = Some(running);
+    }
+
+    fn log_output(&self, control: &Sender<ManagerControlMessage>, process: &mut Running) {
+        
+        let stdout = process.take_output();
+        let thr_control = control.clone();
+        let id = self.id().clone();
+        thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let line = line.expect("Unable to get next line");
+                if let Err(_) = thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::Log(line))) {
+                    break;
+                }
+            }
+        });
+
+        let stderr = process.take_error();
+        let thr_control = control.clone();
+        let id = self.id().clone();
+        thread::spawn(move || {
+            for line in BufReader::new(stderr).lines() {
+                let line = line.expect("Unable to get next line");
+                if let Err(_) = thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(line))) {
+                    break;
+                }
+            }
+        });
+    }
+
+    /// Find the next state.
+    /// If we're idle, start the test.
+    /// The state order goes:
+    /// Idle -> [PreStart] -> Test(0) -> ... -> Test(n) -> [PostSuccess/Fail] -> Idle
+    ///
+    fn find_next_state(&self, current_state: ScenarioState, ctrl: &Sender<ManagerControlMessage>) -> ScenarioState {
+
+        let test_count = self.tests.len();
+        let failure_count = *self.failures.borrow();
+
+        let new_state = match current_state {
+            ScenarioState::Idle => {
+                // Reset the number of errors.
+                *self.failures.borrow_mut() = 0;
+                for test in &self.test_sequence {
+                    test.borrow().pending();
+                }
+
+                //self.broadcast(BroadcastMessageContents::Start(self.id().to_string()));
+                ScenarioState::PreStart
+            }
+
+            // If we've just run the PreStart command, see if we need
+            // to run test 0, or skip straight to Success.
+            ScenarioState::PreStart => ScenarioState::Running(0),
+
+            // If we just finished running a test, determine the next test to run.
+            ScenarioState::Running(i) if (i + 1) < test_count => ScenarioState::Running(i + 1),
+            ScenarioState::Running(i) if (i + 1) >= test_count && failure_count > 0 => {
+                ScenarioState::PostFailure
+            }
+            ScenarioState::Running(i) if (i + 1) >= test_count && failure_count == 0 => {
+                ScenarioState::PostSuccess
+            }
+            ScenarioState::Running(i) => {
+                panic!("Got into a weird state. Running({}), test_count: {}, failure_count: {}",
+                       i,
+                       test_count,
+                       failure_count)
+            }
+            ScenarioState::PostFailure => ScenarioState::TestFinished,
+            ScenarioState::PostSuccess => ScenarioState::TestFinished,
+            ScenarioState::TestFinished => ScenarioState::TestFinished,
+        };
+
+        // If it's an acceptable new state, set that.  Otherwise, recurse
+        // and try the next state.
+        if self.is_state_okay(&new_state, ctrl) {
+            *self.state.borrow_mut() = new_state.clone();
+            new_state
+        } else {
+            self.find_next_state(new_state, ctrl)
+        }
+    }
+
+    /// Check the proposed state to make sure it's acceptable.
+    /// Reasons it might not be acceptable might be because there
+    /// is no exec_start and the new state is PreStart, or because
+    /// the new state is on a test whose requirements are not met.
+    fn is_state_okay(&self, new_state: &ScenarioState, ctrl: &Sender<ManagerControlMessage>) -> bool {
+
+        match *new_state {
+            // We can always enter the idle state.
+            ScenarioState::Idle => true,
+
+            // Run an exec_start command before we run the first test.
+            ScenarioState::PreStart => self.description.exec_start.is_some(),
+
+            // Run a given test.
+            ScenarioState::Running(i) => {
+                let tests = &self.test_sequence;
+                let test = tests[i].borrow();
+                let test_name = test.id();
+                if self.scenario_timed_out() {
+                    false
+                } else if i >= self.tests.len() {
+                    false
+                }
+                // If the test isn't Pending (i.e. if it's skipped or failed), don't run it.
+                else if tests[i].borrow().state() != TestState::Pending {
+                    false
+                }
+                // Make sure all required dependencies succeeded.
+                else if !self.all_dependencies_succeeded(&test_name) {
+                    tests[i].borrow().skip();
+                    ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::Skip(tests[i].borrow().id().clone(), "dependency failed".to_owned()))).ok();
+                    false
+                } else {
+                    true
+                }
+            }
+
+            // Run a script on scenario success.
+            ScenarioState::PostSuccess => self.description.exec_stop_success.is_some(),
+
+            // Run a script on scenario failure.
+            ScenarioState::PostFailure => self.description.exec_stop_failure.is_some(),
+
+            // Presumably we can always finish a test.
+            ScenarioState::TestFinished => true,
+        }
+    }
+
+    fn all_dependencies_succeeded(&self, test_name: &UnitName) -> bool {
+        for parent_name in self.graph.required_parents_of_named(test_name) {
+            if self.description.assumptions.contains(parent_name) {
+                return true;
+            }
+
+            let result = self.tests[parent_name].borrow().state();
+
+            // If the dependent test did not succeed, then at least
+            // one dependency failed.
+            // The test may also be Running, in case it's a Daemon.
+            if result != TestState::Pass && result != TestState::Running {
+                return false;
+            }
+
+            if !self.all_dependencies_succeeded(parent_name) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn scenario_timed_out(&self) -> bool {
+        match self.description.timeout {
+            None => false,
+            Some(timeout) => {
+                let now = Instant::now();
+                let scenario_elapsed_time = now.duration_since(self.start_time);
+                scenario_elapsed_time >= timeout
+            }
+        }
+    }
+
+    fn make_timeout(&self, test_max_time: &Option<Duration>) -> Option<Duration> {
+        let now = Instant::now();
+        let scenario_elapsed_time = now.duration_since(self.start_time);
+
+        // If the test would take longer than the scenario has left, limit the test time.
+        if let Some(test_max_time) = *test_max_time {
+            if let Some(timeout) = self.description.timeout {
+                if (test_max_time + scenario_elapsed_time) > timeout {
+                    Some(timeout - scenario_elapsed_time)
+                } else {
+                    Some(test_max_time)
+                }
+            } else {
+                Some(test_max_time)
+            }
+        } else {
+            None
+        }
+    }
+
+    // Post messages and terminate tests.
+    pub fn finish_scenario(&self, ctrl: &Sender<ManagerControlMessage>) {
+        let failures = *self.failures.borrow();
+        for test in &self.test_sequence {
+            test.borrow().terminate();
+        }
+        if failures > 0 {
+            ctrl.send(ManagerControlMessage::new(self.id(),
+                                                ManagerControlMessageContents::Finished(failures + 500, "at least one test failed".to_owned()))).ok();
+        } else {
+            ctrl.send(ManagerControlMessage::new(self.id(),
+                                                ManagerControlMessageContents::Finished(200, "all tests passed".to_owned()))).ok();
+        }
     }
 }

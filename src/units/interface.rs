@@ -321,6 +321,12 @@ impl Interface {
                     .replace("\n", "\\n")
                     .replace("\r", "\\r")
             ),
+            ManagerStatusMessage::Skipped(test, reason) => {
+                writeln!(process, "SKIP {} {}", test, reason)
+            },
+            ManagerStatusMessage::Finished(scenario, result, reason) => {
+                writeln!(process, "FINISH {} {} {}", scenario, result, reason)
+            },
              /*
             //            BroadcastMessageContents::Hello(name) => writeln!(stdin,
             //                                                "HELLO {}", name),
@@ -328,9 +334,6 @@ impl Interface {
             //                                                "PING {}", val),
             BroadcastMessageContents::Shutdown(reason) => writeln!(stdin, "EXIT {}", reason),
             BroadcastMessageContents::Running(test) => writeln!(stdin, "RUNNING {}", test),
-            BroadcastMessageContents::Skip(test, reason) => {
-                writeln!(stdin, "SKIP {} {}", test, reason)
-            }
             BroadcastMessageContents::Fail(test, reason) => {
                 writeln!(stdin, "FAIL {} {}", test, reason)
             }
@@ -338,9 +341,6 @@ impl Interface {
                 writeln!(stdin, "PASS {} {}", test, reason)
             }
             BroadcastMessageContents::Start(scenario) => writeln!(stdin, "START {}", scenario),
-            BroadcastMessageContents::Finish(scenario, result, reason) => {
-                writeln!(stdin, "FINISH {} {} {}", scenario, result, reason)
-            }
             */
         }
     }

@@ -25,6 +25,8 @@ impl UnitLoader {
             &UnitEvent::Category(_) => (),
             &UnitEvent::Log(_) => (),
             &UnitEvent::ManagerRequest(_) => (),
+            &UnitEvent::ChildProgramExited(_, _) => (),
+            &UnitEvent::RequestProgramExit(_) => (),
         }
     }
 

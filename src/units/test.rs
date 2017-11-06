@@ -3,13 +3,15 @@ extern crate humantime;
 extern crate regex;
 extern crate systemd_parser;
 
-use std::path::{Path, PathBuf};
-use std::time::Duration;
-use std::io::Read;
+use std::cell::RefCell;
 use std::fs::File;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::time::Duration;
 
 use self::dependy::Dependency;
-use self::humantime::parse_duration;
+use self::humantime::{parse_duration, DurationError};
 use self::regex::Regex;
 use self::systemd_parser::items::DirectiveEntry;
 
@@ -18,13 +20,14 @@ use unit::{UnitName, UnitActivateError, UnitDeactivateError, UnitSelectError, Un
            UnitIncompatibleReason, UnitDescriptionError};
 use unitmanager::UnitManager;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 enum TestType {
     Simple,
     Daemon,
 }
 
 /// A struct defining an in-memory representation of a .test file
+#[derive(Clone)]
 pub struct TestDescription {
     /// The id of the unit (including the kind)
     id: UnitName,
@@ -179,7 +182,7 @@ impl TestDescription {
                         "Timeout" => {
                             test_description.timeout = match directive.value() {
                                 None => None,
-                                Some(s) => Some(parse_duration(s)?),
+                                Some(s) => Some(Self::parse_time(s)?),
                             }
                         }
                         "ExecStopSuccess" => {
@@ -191,7 +194,7 @@ impl TestDescription {
                         "ExecStopSuccessTimeout" => {
                             test_description.exec_stop_success_timeout = match directive.value() {
                                 None => None,
-                                Some(s) => Some(parse_duration(s)?),
+                                Some(s) => Some(Self::parse_time(s)?),
                             }
                         }
                         "ExecStopFailure" => {
@@ -203,7 +206,7 @@ impl TestDescription {
                         "ExecStopFailureTimeout" => {
                             test_description.exec_stop_failure_timeout = match directive.value() {
                                 None => None,
-                                Some(s) => Some(parse_duration(s)?),
+                                Some(s) => Some(Self::parse_time(s)?),
                             }
                         }                        &_ => (),
                     }
@@ -215,6 +218,14 @@ impl TestDescription {
             return Err(UnitDescriptionError::MissingValue("Test".to_owned(), "ExecStart".to_owned()));
         }
         Ok(test_description)
+    }
+
+    fn parse_time(time_str: &str) -> Result<Duration, DurationError> {
+        if let Ok(val) = time_str.parse::<u64>() {
+            Ok(Duration::from_secs(val))
+        } else {
+            parse_duration(time_str)
+        }
     }
 
     pub fn id(&self) -> &UnitName {
@@ -247,24 +258,37 @@ impl TestDescription {
     }
 }
 
+#[derive(PartialEq, Clone)]
+pub enum TestState {
+    /// A test has yet to be run.
+    Pending,
+
+    /// A daemon is waiting for its "match" text to appear.
+    Starting,
+
+    /// A test (or daemon) is in the process of running.
+    Running,
+
+    /// A test (or daemon) passed successfully.
+    Pass,
+
+    /// A test (or daemon) was skipped.
+    Skip,
+
+    /// A test (or daemon) failed for some reason.
+    Fail(String),
+}
+
 pub struct Test {
-    id: UnitName,
-    name: String,
-    description: String,
-    requirements: Vec<UnitName>,
-    suggestions: Vec<UnitName>,
-    provides: Vec<UnitName>,
+    description: TestDescription,
+    state: Rc<RefCell<TestState>>,
 }
 
 impl Test {
     pub fn new(desc: &TestDescription) -> Test {
         Test {
-            id: desc.id.clone(),
-            name: desc.name.clone(),
-            description: desc.description.clone(),
-            requirements: desc.requires.clone(),
-            suggestions: desc.suggests.clone(),
-            provides: desc.provides.clone(),
+            description: desc.clone(),
+            state: Rc::new(RefCell::new(TestState::Pending)),
          }
     }
 
@@ -285,29 +309,49 @@ impl Test {
     }
 
     pub fn id(&self) -> &UnitName {
-        &self.id
+        &self.description.id
     }
 
     pub fn name(&self) -> &String {
-        &self.name
+        &self.description.name
     }
 
     pub fn description(&self) -> &String {
-        &self.description
+        &self.description.description
+    }
+
+    pub fn state(&self) -> TestState {
+        self.state.borrow().clone()
+    }
+
+    pub fn skip(&self) {
+        *self.state.borrow_mut() = TestState::Skip;
+    }
+
+    pub fn pending(&self) {
+        *self.state.borrow_mut() = TestState::Pending;
+    }
+
+    pub fn terminate(&self) {
+        unimplemented!();
+    }
+
+    pub fn timeout(&self) -> &Option<Duration> {
+        &self.description.timeout
     }
 }
 
 impl Dependency<UnitName> for Test {
     fn name(&self) -> &UnitName {
-        &self.id
+        &self.description.id
     }
     fn requirements(&self) -> &Vec<UnitName> {
-        &self.requirements
+        &self.description.requires
     }
     fn suggestions(&self) -> &Vec<UnitName> {
-        &self.suggestions
+        &self.description.suggests
     }
     fn provides(&self) -> &Vec<UnitName> {
-        &self.provides
+        &self.description.provides
     }
 }
