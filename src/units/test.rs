@@ -1,24 +1,30 @@
 extern crate dependy;
 extern crate humantime;
 extern crate regex;
+extern crate runny;
 extern crate systemd_parser;
 
 use std::cell::RefCell;
 use std::fs::File;
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::mpsc::Sender;
+use std::thread;
 use std::time::Duration;
 
 use self::dependy::Dependency;
 use self::humantime::{parse_duration, DurationError};
 use self::regex::Regex;
+use self::runny::Runny;
+use self::runny::running::Running;
 use self::systemd_parser::items::DirectiveEntry;
 
 use config::Config;
 use unit::{UnitName, UnitActivateError, UnitDeactivateError, UnitSelectError, UnitDeselectError,
            UnitIncompatibleReason, UnitDescriptionError};
-use unitmanager::UnitManager;
+use unitmanager::{ManagerControlMessage, ManagerControlMessageContents,
+                  UnitManager};
 
 #[derive(Debug, PartialEq, Clone)]
 enum TestType {
@@ -71,13 +77,13 @@ pub struct TestDescription {
     test_daemon_ready: Option<Regex>,
 
     /// ExecStart: The command to run as part of this test.
-    exec_start: PathBuf,
+    exec_start: String,
 
     /// ExecStopFail: When stopping tests, if the test failed, then this stop command will be run.
-    exec_stop_failure: Option<PathBuf>,
+    exec_stop_failure: Option<String>,
 
     /// ExecStopSuccess: When stopping tests, if the test succeeded, then this stop command will be run.
-    exec_stop_success: Option<PathBuf>,
+    exec_stop_success: Option<String>,
 
     /// working_directory: Directory to run progrms from, if any.
     working_directory: Option<PathBuf>,
@@ -115,7 +121,7 @@ impl TestDescription {
 
             test_daemon_ready: None,
 
-            exec_start: PathBuf::from(""),
+            exec_start: "".to_owned(),
             exec_stop_failure: None,
             exec_stop_success: None,
             working_directory: None,
@@ -176,7 +182,7 @@ impl TestDescription {
                         "ExecStart" => {
                             test_description.exec_start = match directive.value() {
                                 None => return Err(UnitDescriptionError::MissingValue("Test".to_owned(), "ExecStart".to_owned())),
-                                Some(s) => PathBuf::from(s),
+                                Some(s) => s.to_owned(),
                             }
                         }
                         "Timeout" => {
@@ -188,7 +194,7 @@ impl TestDescription {
                         "ExecStopSuccess" => {
                             test_description.exec_stop_success = match directive.value() {
                                 None => None,
-                                Some(s) => Some(PathBuf::from(s)),
+                                Some(s) => Some(s.to_owned()),
                             }
                         }
                         "ExecStopSuccessTimeout" => {
@@ -200,7 +206,7 @@ impl TestDescription {
                         "ExecStopFailure" => {
                             test_description.exec_stop_failure = match directive.value() {
                                 None => None,
-                                Some(s) => Some(PathBuf::from(s)),
+                                Some(s) => Some(s.to_owned()),
                             }
                         }
                         "ExecStopFailureTimeout" => {
@@ -214,7 +220,7 @@ impl TestDescription {
                 &_ => (),
             }
         }
-        if test_description.exec_start.to_string_lossy() == "" {
+        if test_description.exec_start == "" {
             return Err(UnitDescriptionError::MissingValue("Test".to_owned(), "ExecStart".to_owned()));
         }
         Ok(test_description)
@@ -282,6 +288,7 @@ pub enum TestState {
 pub struct Test {
     description: TestDescription,
     state: Rc<RefCell<TestState>>,
+    program: Rc<RefCell<Option<Running>>>,
 }
 
 impl Test {
@@ -289,6 +296,7 @@ impl Test {
         Test {
             description: desc.clone(),
             state: Rc::new(RefCell::new(TestState::Pending)),
+            program: Rc::new(RefCell::new(None)),
          }
     }
 
@@ -300,7 +308,41 @@ impl Test {
         Ok(())
     }
 
-    pub fn activate(&self) -> Result<(), UnitActivateError> {
+    pub fn activate(
+        &mut self,
+        manager: &UnitManager,
+        config: &Config,
+    ) -> Result<(), UnitActivateError> {
+
+        // We'll communicate to the manager through this pipe.
+        let ctrl = manager.get_control_channel();
+
+        let cmd = &self.description.exec_start;
+        let timeout = &self.description.timeout;
+
+        let mut cmd = Runny::new(cmd);
+        if let Some(timeout) = *timeout {
+            cmd.timeout(timeout);
+        }
+        cmd.directory(&Some(config.working_directory(&self.description.working_directory)));
+        let mut running = match cmd.start() {
+            Ok(o) => o,
+            Err(e) => unimplemented!(),
+        };
+
+        self.log_output(&ctrl, &mut running);
+
+        // Keep a waiter around in a separate thread to send that AdvanceScenario message upon completion.
+        let thr_waiter = running.waiter();
+        let thr_control = ctrl.clone();
+        let id = self.id().clone();
+        thread::spawn(move || {
+            thr_waiter.wait();
+            thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(thr_waiter.result()))).ok();
+        });
+
+        *self.program.borrow_mut() = Some(running);
+
         Ok(())
     }
 
@@ -338,6 +380,33 @@ impl Test {
 
     pub fn timeout(&self) -> &Option<Duration> {
         &self.description.timeout
+    }
+
+    fn log_output(&self, control: &Sender<ManagerControlMessage>, process: &mut Running) {
+        
+        let stdout = process.take_output();
+        let thr_control = control.clone();
+        let id = self.id().clone();
+        thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let line = line.expect("Unable to get next line");
+                if let Err(_) = thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::Log(line))) {
+                    break;
+                }
+            }
+        });
+
+        let stderr = process.take_error();
+        let thr_control = control.clone();
+        let id = self.id().clone();
+        thread::spawn(move || {
+            for line in BufReader::new(stderr).lines() {
+                let line = line.expect("Unable to get next line");
+                if let Err(_) = thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(line))) {
+                    break;
+                }
+            }
+        });
     }
 }
 

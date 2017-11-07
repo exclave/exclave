@@ -134,6 +134,12 @@ pub enum ManagerControlMessageContents {
     /// Start running a scenario, or the default scenario if None
     StartScenario(Option<UnitName>),
 
+    /// Start running a given test.
+    StartTest(UnitName),
+
+    /// Stop running a given test.
+    StopTest(UnitName),
+
     /// Indicates that a test was skipped, and why.
     Skip(UnitName, String /* reason */),
 
@@ -505,7 +511,7 @@ impl UnitManager {
                 Err(UnitActivateError::UnitNotSelected)
             } else {
                 // Activate this jig.
-                s.borrow_mut().activate()
+                s.borrow_mut().activate(self, &*self.cfg.lock().unwrap())
             }
         }
     }
@@ -526,8 +532,11 @@ impl UnitManager {
         }
     }
 
-    fn activate_test(&self, _id: &UnitName) -> Result<(), UnitActivateError> {
-        unimplemented!();
+    fn activate_test(&self, id: &UnitName) -> Result<(), UnitActivateError> {
+        match self.tests.borrow().get(id) {
+            None => Err(UnitActivateError::UnitNotFound),
+            Some(ref s) => s.borrow_mut().activate(self, &*self.cfg.lock().unwrap()),
+        }
     }
 
     pub fn deactivate(&self, id: &UnitName, reason: &str) {
@@ -771,6 +780,12 @@ impl UnitManager {
             }
             ManagerControlMessageContents::Finished(code, ref message) => {
                 self.broadcast_finished(sender_name, code, message);
+            }
+            ManagerControlMessageContents::StartTest(ref test_name) => {
+                self.activate(test_name);
+            }
+            ManagerControlMessageContents::StopTest(ref test_name) => {
+                self.deactivate(test_name, "controller requested test stop");
             }
         }
     }

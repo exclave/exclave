@@ -203,12 +203,9 @@ impl Interface {
         manager: &UnitManager,
         config: &Config,
     ) -> Result<(), UnitActivateError> {
-        let wd = if let Some(ref d) = self.working_directory {
-            Some(d.clone())
-        } else {
-            Some(config.working_directory().clone())
-        };
-        let mut running = Runny::new(self.exec_start.as_str()).directory(&wd).start()?;
+        let mut running = Runny::new(self.exec_start.as_str())
+                    .directory(&Some(config.working_directory(&self.working_directory)))
+                    .start()?;
 
         let stdout = running.take_output();
         let stderr = running.take_error();

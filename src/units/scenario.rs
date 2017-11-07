@@ -271,7 +271,7 @@ impl ScenarioDescription {
                   config: &Config)
                   -> Result<Scenario, UnitIncompatibleReason> {
         let (test_order, graph) = self.is_compatible(manager, config)?;
-        Ok(Scenario::new(self, test_order, manager, graph))
+        Ok(Scenario::new(self, test_order, manager, graph, config))
     }
 
     pub fn get_test_order(&self,
@@ -358,7 +358,7 @@ pub struct Scenario {
     state: Rc<RefCell<ScenarioState>>,
 
     /// The current working directory, based on the description, jig, and config.
-    working_directory: Rc<RefCell<Option<PathBuf>>>,
+    working_directory: Rc<RefCell<PathBuf>>,
 
     /// The dependency graph of tests.
     graph: Dependy<UnitName>,
@@ -374,7 +374,8 @@ impl Scenario {
     fn new(desc: &ScenarioDescription,
                test_order: Vec<UnitName>,
                manager: &UnitManager,
-               graph: Dependy<UnitName>)
+               graph: Dependy<UnitName>,
+               config: &Config)
                -> Scenario {
 
         let mut tests = HashMap::new();
@@ -395,7 +396,7 @@ impl Scenario {
             test_states: test_state,
             exec_start_state: Rc::new(RefCell::new(TestState::Pending)),
             state: Rc::new(RefCell::new(ScenarioState::Idle)),
-            working_directory: Rc::new(RefCell::new(None)),
+            working_directory: Rc::new(RefCell::new(config.working_directory(&None))),
             failures: Rc::new(RefCell::new(0)),
             graph: graph,
             start_time: Instant::now(),
@@ -446,21 +447,8 @@ impl Scenario {
         }
 
         // Re-assign our working directory.
-        let mut wd = None;
-        if let Some(ref d) = self.description.working_directory {
-            wd = Some(d.clone());
-        }
-        if wd.is_none() && manager.get_current_jig().is_some() {
-            let d = manager.get_current_jig().unwrap();
-            let d = d.borrow();
-            if d.working_directory().is_some() {
-                wd = d.working_directory().clone();
-            }
-        }
-        if wd.is_none() {
-            wd = Some(config.working_directory().clone())
-        };
-        *self.working_directory.borrow_mut() = wd;
+        config.set_scenario_working_directory(&self.description.working_directory);
+        *self.working_directory.borrow_mut() = config.working_directory(&None);
 
         // Cause the scenario to move to the next phase.
         ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::AdvanceScenario(0))).ok();
@@ -491,14 +479,14 @@ impl Scenario {
         // Run the test's stop() command if we just ran a test.
         match current_state {
             ScenarioState::Running(step) => {
+                let test_id = self.test_sequence[step].borrow().id().clone();
                 let result = match last_result {
                     0 => TestState::Pass,
                     r => TestState::Fail(format!("test exited with {}", r)),
                 };
-                *self.test_states.get(self.test_sequence[step].borrow().id()).unwrap().borrow_mut() = result;
+                *self.test_states.get(&test_id).unwrap().borrow_mut() = result;
                 /* XXX Run the test's STOP command */
-//                self.test_sequence[step]
-//                    .stop(&*self.working_directory.lock().unwrap())
+                ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::StopTest(test_id))).ok();
             }
             ScenarioState::PreStart => {
                 match last_result {
@@ -528,6 +516,7 @@ impl Scenario {
                 let ref test = self.test_sequence[next_step].borrow();
                 let test_timeout = test.timeout();
                 let test_max_time = self.make_timeout(test_timeout);
+                ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::StartTest(test.id().clone()))).ok();
                 //test.start(&*self.working_directory.lock().unwrap(), test_max_time);
             }
             ScenarioState::PostSuccess => {
@@ -558,7 +547,7 @@ impl Scenario {
         if let Some(timeout) = *timeout {
             cmd.timeout(timeout);
         }
-        cmd.directory(&*self.working_directory.borrow());
+        cmd.directory(&Some(self.working_directory.borrow().clone()));
         let mut running = match cmd.start() {
             Ok(o) => o,
             Err(e) => unimplemented!(),

@@ -120,7 +120,7 @@ impl JigDescription {
             use std::io::{BufRead, BufReader};
 
             let running = Runny::new(cmd_str)
-                .directory(&Some(config.working_directory().clone()))
+                .directory(&Some(config.working_directory(&self.working_directory).clone()))
                 .timeout(config.timeout().clone())
                 .path(config.paths().clone())
                 .start()?;
@@ -205,7 +205,12 @@ impl Jig {
         Ok(())
     }
 
-    pub fn activate(&self) -> Result<(), UnitActivateError> {
+    pub fn activate(
+        &mut self,
+        _manager: &UnitManager,
+        config: &Config,
+    ) -> Result<(), UnitActivateError> {
+        config.set_jig_working_directory(&self.working_directory);
         Ok(())
     }
 
