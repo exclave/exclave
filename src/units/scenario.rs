@@ -440,6 +440,10 @@ impl Scenario {
         *self.failures.borrow_mut() = 0;
         self.start_time = Instant::now();
         *self.state.borrow_mut() = ScenarioState::Idle;
+        *self.exec_start_state.borrow_mut() = TestState::Pending;
+        for (_, item) in &self.test_states {
+            *item.borrow_mut() = TestState::Pending;
+        }
 
         // Re-assign our working directory.
         let mut wd = None;
@@ -678,9 +682,11 @@ impl Scenario {
                     false
                 } else if i >= self.tests.len() {
                     false
-                }
-                // If the test isn't Pending (i.e. if it's skipped or failed), don't run it.
-                else if tests[i].borrow().state() != TestState::Pending {
+                } else if let TestState::Fail(ref _x) = *self.exec_start_state.borrow() {
+                    // If the preroll command failed, then abort.
+                    false
+                } else if tests[i].borrow().state() != TestState::Pending {
+                    // If the test isn't Pending (i.e. if it's skipped or failed), don't run it.
                     false
                 }
                 // Make sure all required dependencies succeeded.
