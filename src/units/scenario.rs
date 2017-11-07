@@ -345,14 +345,20 @@ pub struct Scenario {
     /// A pointer to the tests that are part of this scenario.
     tests: HashMap<UnitName, Rc<RefCell<Test>>>,
 
+    /// The results of each individual test.
+    test_states: HashMap<UnitName, Rc<RefCell<TestState>>>,
+
+    /// The result of the ExecStart run program (if any).
+    exec_start_state: Rc<RefCell<TestState>>,
+    
+    /// How many tests have failed in this particular run.
+    failures: Rc<RefCell<u32>>,
+
     /// The current state of the scenario, when activated.
     state: Rc<RefCell<ScenarioState>>,
 
     /// The current working directory, based on the description, jig, and config.
     working_directory: Rc<RefCell<Option<PathBuf>>>,
-
-    /// How many tests have failed in this particular run.
-    failures: Rc<RefCell<u32>>,
 
     /// The dependency graph of tests.
     graph: Dependy<UnitName>,
@@ -373,10 +379,12 @@ impl Scenario {
 
         let mut tests = HashMap::new();
         let mut test_sequence = vec![];
+        let mut test_state = HashMap::new();
 
         for test_name in test_order {
             let test = manager.get_test_named(&test_name).expect("Unable to check out requested test from library");
             test_sequence.push(test.clone());
+            test_state.insert(test_name.clone(), Rc::new(RefCell::new(TestState::Pending)));
             tests.insert(test_name, test);
         }
 
@@ -384,6 +392,8 @@ impl Scenario {
             description: desc.clone(),
             tests: tests,
             test_sequence: test_sequence,
+            test_states: test_state,
+            exec_start_state: Rc::new(RefCell::new(TestState::Pending)),
             state: Rc::new(RefCell::new(ScenarioState::Idle)),
             working_directory: Rc::new(RefCell::new(None)),
             failures: Rc::new(RefCell::new(0)),
@@ -477,9 +487,20 @@ impl Scenario {
         // Run the test's stop() command if we just ran a test.
         match current_state {
             ScenarioState::Running(step) => {
+                let result = match last_result {
+                    0 => TestState::Pass,
+                    r => TestState::Fail(format!("test exited with {}", r)),
+                };
+                *self.test_states.get(self.test_sequence[step].borrow().id()).unwrap().borrow_mut() = result;
                 /* XXX Run the test's STOP command */
 //                self.test_sequence[step]
 //                    .stop(&*self.working_directory.lock().unwrap())
+            }
+            ScenarioState::PreStart => {
+                match last_result {
+                    0 => *self.exec_start_state.borrow_mut() = TestState::Pass,
+                    r => *self.exec_start_state.borrow_mut() = TestState::Fail(format!("test exited with {}", r)),
+                }
             }
             _ => (),
         }
