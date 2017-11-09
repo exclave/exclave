@@ -14,6 +14,7 @@ use self::systemd_parser::items::DirectiveEntry;
 use self::runny::Runny;
 
 /// A struct defining an in-memory representation of a .jig file
+#[derive(Clone)]
 pub struct JigDescription {
     /// The id of the unit (including the kind)
     id: UnitName,
@@ -159,42 +160,30 @@ impl JigDescription {
 }
 
 pub struct Jig {
-    id: UnitName,
-    name: String,
-    description: String,
-    default_scenario: Option<UnitName>,
-    working_directory: Option<PathBuf>,
+    description: JigDescription,
 }
 
 impl Jig {
     pub fn new(desc: &JigDescription) -> Jig {
         Jig {
-            id: desc.id.clone(),
-            name: desc.name.clone(),
-            description: desc.description.clone(),
-            default_scenario: desc.default_scenario.clone(),
-            working_directory: desc.working_directory.clone(),
+            description: desc.clone(),
         }
     }
 
     pub fn id(&self) -> &UnitName {
-        &self.id
+        &self.description.id
     }
 
     pub fn name(&self) -> &String {
-        &self.name
+        &self.description.name
     }
 
     pub fn description(&self) -> &String {
-        &self.description
+        &self.description.description
     }
 
     pub fn default_scenario(&self) -> &Option<UnitName> {
-        &self.default_scenario
-    }
-
-    pub fn working_directory(&self) -> &Option<PathBuf> {
-        &self.working_directory
+        &self.description.default_scenario
     }
 
     pub fn select(&self) -> Result<(), UnitSelectError> {
@@ -210,7 +199,7 @@ impl Jig {
         _manager: &UnitManager,
         config: &Config,
     ) -> Result<(), UnitActivateError> {
-        config.set_jig_working_directory(&self.working_directory);
+        config.set_jig_working_directory(&self.description.working_directory);
         Ok(())
     }
 
