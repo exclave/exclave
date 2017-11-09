@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use config::Config;
-use unit::{UnitName, UnitKind, UnitActivateError, UnitDeactivateError, UnitSelectError, UnitDeselectError};
+use unit::{UnitName, UnitKind, UnitActivateError, UnitDeactivateError, UnitSelectError, UnitDeselectError, UnitIncompatibleReason};
 use unitbroadcaster::{UnitBroadcaster, UnitEvent, UnitStatusEvent, UnitStatus, LogEntry};
 use units::interface::{Interface, InterfaceDescription};
 use units::jig::{Jig, JigDescription};
@@ -42,7 +42,7 @@ macro_rules! load {
                             format!("{}", e),
                         )),
                     );
-                    Err(())
+                    Err(e)
                 }
             }
         }
@@ -68,7 +68,7 @@ impl fmt::Display for FieldType {
 #[derive(Debug, Clone)]
 pub enum ManagerStatusMessage {
     /// Return the first name of the jig we're running on.
-    Jig(UnitName /* Name of the jig */),
+    Jig(Option<UnitName> /* Name of the jig (if one is selected) */),
 
     /// Return a list of known scenarios.
     Scenarios(Vec<UnitName>),
@@ -231,23 +231,19 @@ impl UnitManager {
         self.control_sender.clone()
     }
 
-    pub fn get_broadcast_channel(&self) -> UnitBroadcaster {
-        self.bc.clone()
-    }
-
-    pub fn load_interface(&self, description: &InterfaceDescription) -> Result<UnitName, ()> {
+    pub fn load_interface(&self, description: &InterfaceDescription) -> Result<UnitName, UnitIncompatibleReason> {
         load!(self, interfaces, description)
     }
 
-    pub fn load_test(&self, desceription: &TestDescription) -> Result<UnitName, ()> {
+    pub fn load_test(&self, desceription: &TestDescription) -> Result<UnitName, UnitIncompatibleReason> {
         load!(self, tests, desceription)
     }
 
-    pub fn load_jig(&self, desceription: &JigDescription) -> Result<UnitName, ()> {
+    pub fn load_jig(&self, desceription: &JigDescription) -> Result<UnitName, UnitIncompatibleReason> {
         load!(self, jigs, desceription)
     }
 
-    pub fn load_scenario(&self, desceription: &ScenarioDescription) -> Result<UnitName, ()> {
+    pub fn load_scenario(&self, desceription: &ScenarioDescription) -> Result<UnitName, UnitIncompatibleReason> {
         load!(self, scenarios, desceription)
     }
 
@@ -304,8 +300,11 @@ impl UnitManager {
         // Select this scenario.
         new_scenario.borrow_mut().select()?;
         *self.current_scenario.borrow_mut() = Some(new_scenario.clone());
-        self.bc
-            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(id)));
+
+        // Now select every test associated with the scenario.
+        for test_id in new_scenario.borrow().test_sequence() {
+            //self.tests.borrow().get(test_id).unwrap().borrow().select()
+        }
         Ok(())
     }
 
@@ -335,8 +334,6 @@ impl UnitManager {
         // Select this jig.
         new_jig.borrow_mut().select()?;
         *self.current_jig.borrow_mut() = Some(new_jig.clone());
-        self.bc
-            .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(id)));
 
         // If this jig has a default scenario, select that too.
         if let Some(ref scenario_name) = *new_jig.borrow().default_scenario() {
@@ -793,11 +790,11 @@ impl UnitManager {
 
     pub fn send_jig_to(&self, sender_name: &UnitName) {
         let messages = match *self.current_jig.borrow() {
-            None => vec![ManagerStatusMessage::Jig(UnitName::from_str("", "jig").unwrap())],
+            None => vec![ManagerStatusMessage::Jig(None)],
             Some(ref jig_rc) => {
                 let jig = jig_rc.borrow();
                 vec![
-                    ManagerStatusMessage::Jig(jig.id().clone()),
+                    ManagerStatusMessage::Jig(Some(jig.id().clone())),
                     ManagerStatusMessage::Describe(jig.id().clone(), FieldType::Name, jig.name().clone()),
                     ManagerStatusMessage::Describe(jig.id().clone(), FieldType::Description, jig.description().clone())
                 ]
@@ -866,7 +863,7 @@ impl UnitManager {
                 let jig = j.borrow();
                 for (interface_id, _) in self.interfaces.borrow().iter() {
                     let messages = vec![
-                        ManagerStatusMessage::Jig(jig.id().clone())
+                        ManagerStatusMessage::Jig(Some(jig.id().clone()))
                     ];
                     self.send_messages_to(interface_id, messages);
                 }

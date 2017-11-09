@@ -15,24 +15,29 @@ use units::scenario::{ScenarioDescription};
 use units::test::{TestDescription};
 
 macro_rules! process_if {
-    ($slf:ident, $name:ident, $status:ident, $tstkind:path, $path:ident, $trgt:ident, $drty:ident, $desc:ident) => {
+    ($slf:ident, $name:ident, $status:ident, $tstkind:path, $path:ident, $trgt:ident, $desc:ident) => {
         if $name.kind() == &$tstkind {
+            // Add the unit name to a list of "dirty units" that will be checked during "rescan()"
+            $slf.mark_dirty($name);
             match $trgt::from_path($path) {
-                Err(e) =>
-                    $slf.broadcaster.broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_failed($name, format!("{}", e)))),
+                Err(e) => {
+                    let status = UnitStatus::LoadFailed(format!("{}", e));
+
+                    $slf.broadcaster
+                        .broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_failed($name, format!("{}", e))));
+                    // Add an entry to the status to report unit failure.
+                    $slf.unit_status
+                        .borrow_mut()
+                        .insert($name.clone(), status);
+                },
                 Ok(description) => {
-                    let id = description.id().clone();
-
                     // Insert it into the description table
-                    $slf.$desc.borrow_mut().insert(id.clone(), description);
-
-                    // Add the unit name to a list of "dirty units" that will be checked during "rescan()"
-                    $slf.$drty.borrow_mut().insert(id.clone(), ());
+                    $slf.$desc.borrow_mut().insert($name.clone(), description);
 
                     // Add an entry to the status to determine whether this unit is new or not.
                     $slf.unit_status
                         .borrow_mut()
-                        .insert(id, $status.clone());
+                        .insert($name.clone(), $status.clone());
 
                     $slf.broadcaster
                         .broadcast(&UnitEvent::Category(UnitCategoryEvent::new($tstkind,
@@ -52,28 +57,33 @@ macro_rules! load_units_for_activation {
         {
             let mut to_remove = vec![];
             for (id, _) in $slf.$dirty.borrow().iter() {
-                let status = $statuses.get(id);
-                if status.is_none() {
-                    to_remove.push(id.clone());
-                    continue;
-                }
-                let status = status.unwrap();
+                let load_result = {
+                    let status = $statuses.get(id);
+                    if status.is_none() {
+                        to_remove.push(id.clone());
+                        continue;
+                    }
+                    let status = status.unwrap();
 
-                let descriptions = $slf.$descriptions.borrow();
-                let description = descriptions.get(id);
-                if description.is_none() {
-                    to_remove.push(id.clone());
-                    continue;
-                }
-                let description = description.unwrap();
+                    let descriptions = $slf.$descriptions.borrow();
+                    let description = descriptions.get(id);
+                    if description.is_none() {
+                        to_remove.push(id.clone());
+                        continue;
+                    }
+                    let description = description.unwrap();
 
-                let load_result = match status {
-                    &UnitStatus::LoadStarted(_) => $slf.unit_manager.borrow_mut().$load(description),
-                    &UnitStatus::UpdateStarted(_) => $slf.unit_manager.borrow_mut().$load(description),
-                    x => panic!("Unexpected unit status: {}", x),
+                    $slf.unit_manager.borrow_mut().unload(id);
+
+                    match status {
+                        &UnitStatus::LoadStarted(_) => $slf.unit_manager.borrow_mut().$load(description),
+                        &UnitStatus::UpdateStarted(_) => $slf.unit_manager.borrow_mut().$load(description),
+                        x => panic!("Unexpected unit status: {}", x),
+                    }
                 };
 
-                if load_result.is_err() {
+                if let Err(e) = load_result {
+                    $statuses.insert(id.clone(), UnitStatus::LoadFailed(format!("{}", e)));
                     to_remove.push(id.clone());
                 }
             }
@@ -152,6 +162,17 @@ impl UnitLibrary {
         }
     }
 
+    fn mark_dirty(&self, name: &UnitName) {
+        // Add the unit name to a list of "dirty units" that will be checked during "rescan()"
+        match name.kind() {
+            &UnitKind::Interface => self.dirty_interfaces.borrow_mut().insert(name.clone(), ()),
+            &UnitKind::Jig => self.dirty_jigs.borrow_mut().insert(name.clone(), ()),
+            &UnitKind::Test => self.dirty_tests.borrow_mut().insert(name.clone(), ()),
+            &UnitKind::Scenario => self.dirty_scenarios.borrow_mut().insert(name.clone(), ()),
+            &UnitKind::Internal => None,
+        };
+    }
+
     /// Examine all of the loaded units and ensure they can be loaded.
     ///
     /// Each unit type must be handled differently.
@@ -213,32 +234,58 @@ impl UnitLibrary {
         }
 
         // 3. Delete any "dirty" objects that were Deleted.
-        for (id, _) in self.dirty_jigs.borrow().iter() {
-            if let &UnitStatus::UnloadStarted(_) = statuses.get(id).unwrap() {
-                self.jig_descriptions.borrow_mut().remove(id);
-                self.unit_manager.borrow_mut().unload(id);
-                statuses.remove(id);
+        {
+            let mut to_remove = vec![];
+            for (id, _) in self.dirty_jigs.borrow().iter() {
+                match *statuses.get(id).expect("Unable to find dirty jig in status list") {
+                    UnitStatus::UnloadStarted(_) | UnitStatus::LoadFailed(_) => {
+                        self.jig_descriptions.borrow_mut().remove(id);
+                        self.unit_manager.borrow_mut().unload(id);
+                        to_remove.push(id.clone());
+                    }
+                    _ => (),
+                }
             }
-        }
-        for (id, _) in self.dirty_tests.borrow().iter() {
-            if let &UnitStatus::UnloadStarted(_) = statuses.get(id).expect("Unable to find status in dirty test list") {
-                self.test_descriptions.borrow_mut().remove(id);
-                self.unit_manager.borrow_mut().unload(id);
-                statuses.remove(id);
+            for (id, _) in self.dirty_tests.borrow().iter() {
+                match *statuses.get(id).expect("Unable to find dirty test in status list") {
+                    UnitStatus::UnloadStarted(_) | UnitStatus::LoadFailed(_) => {
+                        self.test_descriptions.borrow_mut().remove(id);
+                        self.unit_manager.borrow_mut().unload(id);
+                        to_remove.push(id.clone());
+                    }
+                    _ => (),
+                }
             }
-        }
-        for (id, _) in self.dirty_scenarios.borrow().iter() {
-            if let &UnitStatus::UnloadStarted(_) = statuses.get(id).expect("Unable to find status in dirty scenario list") {
-                self.scenario_descriptions.borrow_mut().remove(id);
-                self.unit_manager.borrow_mut().unload(id);
-                statuses.remove(id);
+            for (id, _) in self.dirty_scenarios.borrow().iter() {
+                match *statuses.get(id).expect("Unable to find dirty scenario in status list") {
+                    UnitStatus::UnloadStarted(_) | UnitStatus::LoadFailed(_) => {
+                        self.scenario_descriptions.borrow_mut().remove(id);
+                        self.unit_manager.borrow_mut().unload(id);
+                        to_remove.push(id.clone());
+                    }
+                    _ => (),
+                }
             }
-        }
-        for (id, _) in self.dirty_interfaces.borrow().iter() {
-            if let &UnitStatus::UnloadStarted(_) = statuses.get(id).expect("Unable to find status in dirty interface list") {
-                self.interface_descriptions.borrow_mut().remove(id);
-                self.unit_manager.borrow_mut().unload(id);
-                statuses.remove(id);
+            for (id, _) in self.dirty_interfaces.borrow().iter() {
+                match *statuses.get(id).expect("Unable to find dirty interface in status list") {
+                    UnitStatus::UnloadStarted(_) | UnitStatus::LoadFailed(_) => {
+                        self.interface_descriptions.borrow_mut().remove(id);
+                        self.unit_manager.borrow_mut().unload(id);
+                        to_remove.push(id.clone());
+                    }
+                    _ => (),
+                }
+            }
+
+            for id in to_remove {
+                match *id.kind() {
+                    UnitKind::Jig => self.dirty_jigs.borrow_mut().remove(&id),
+                    UnitKind::Test => self.dirty_tests.borrow_mut().remove(&id),
+                    UnitKind::Scenario => self.dirty_scenarios.borrow_mut().remove(&id),
+                    UnitKind::Interface => self.dirty_interfaces.borrow_mut().remove(&id),
+                    UnitKind::Internal => None,
+                };
+                statuses.remove(&id);
             }
         }
 
@@ -273,29 +320,22 @@ impl UnitLibrary {
 
                 match status {
                     &UnitStatus::LoadStarted(ref path) => {
-                        process_if!(self, name, status, UnitKind::Jig, path, JigDescription, dirty_jigs, jig_descriptions);
-                        process_if!(self, name, status, UnitKind::Interface, path, InterfaceDescription, dirty_interfaces, interface_descriptions);
-                        process_if!(self, name, status, UnitKind::Test, path, TestDescription, dirty_tests, test_descriptions);
-                        process_if!(self, name, status, UnitKind::Scenario, path, ScenarioDescription, dirty_scenarios, scenario_descriptions);
+                        process_if!(self, name, status, UnitKind::Jig, path, JigDescription, jig_descriptions);
+                        process_if!(self, name, status, UnitKind::Interface, path, InterfaceDescription, interface_descriptions);
+                        process_if!(self, name, status, UnitKind::Test, path, TestDescription, test_descriptions);
+                        process_if!(self, name, status, UnitKind::Scenario, path, ScenarioDescription, scenario_descriptions);
                     }
                     &UnitStatus::UpdateStarted(ref path) => {
-                        process_if!(self, name, status, UnitKind::Jig, path, JigDescription, dirty_jigs, jig_descriptions);
-                        process_if!(self, name, status, UnitKind::Interface, path, InterfaceDescription, dirty_interfaces, interface_descriptions);
-                        process_if!(self, name, status, UnitKind::Test, path, TestDescription, dirty_tests, test_descriptions);
-                        process_if!(self, name, status, UnitKind::Scenario, path, ScenarioDescription, dirty_scenarios, scenario_descriptions);
+                        process_if!(self, name, status, UnitKind::Jig, path, JigDescription, jig_descriptions);
+                        process_if!(self, name, status, UnitKind::Interface, path, InterfaceDescription, interface_descriptions);
+                        process_if!(self, name, status, UnitKind::Test, path, TestDescription, test_descriptions);
+                        process_if!(self, name, status, UnitKind::Scenario, path, ScenarioDescription, scenario_descriptions);
                     }
                     &UnitStatus::UnloadStarted(ref path) => {
-                        // Add the unit name to a list of "dirty units" that will be checked during "rescan()"
                         self.unit_status
                             .borrow_mut()
                             .insert(name.clone(), UnitStatus::UnloadStarted(path.clone()));
-                        match name.kind() {
-                            &UnitKind::Interface => self.dirty_interfaces.borrow_mut().insert(name.clone(), ()),
-                            &UnitKind::Jig => self.dirty_jigs.borrow_mut().insert(name.clone(), ()),
-                            &UnitKind::Test => self.dirty_tests.borrow_mut().insert(name.clone(), ()),
-                            &UnitKind::Scenario => self.dirty_scenarios.borrow_mut().insert(name.clone(), ()),
-                            &UnitKind::Internal => None,
-                        };
+                        self.mark_dirty(name);
                     },
                     _ => (),
                 }

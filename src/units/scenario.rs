@@ -448,6 +448,7 @@ impl Scenario {
         }
 
         // Re-assign our working directory.
+        ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::AdvanceScenario(0))).ok();
         config.set_scenario_working_directory(&self.description.working_directory);
         *self.working_directory.borrow_mut() = config.working_directory(&None);
 

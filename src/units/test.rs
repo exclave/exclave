@@ -325,10 +325,7 @@ impl Test {
             cmd.timeout(timeout);
         }
         cmd.directory(&Some(config.working_directory(&self.description.working_directory)));
-        let mut running = match cmd.start() {
-            Ok(o) => o,
-            Err(e) => unimplemented!(),
-        };
+        let mut running = cmd.start()?;
 
         self.log_output(&ctrl, &mut running);
 

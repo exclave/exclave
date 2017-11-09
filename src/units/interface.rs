@@ -281,7 +281,10 @@ impl Interface {
         let process = process_opt.as_mut().unwrap();
 
         match msg {
-            ManagerStatusMessage::Jig(j) => writeln!(process, "JIG {}", Self::cfti_escape(&format!("{}", j))),
+            ManagerStatusMessage::Jig(j) => match j {
+                Some(jig_name) => writeln!(process, "JIG {}", Self::cfti_escape(&format!("{}", jig_name))),
+                None => writeln!(process, "JIG"),
+            },
             ManagerStatusMessage::Hello(id) => writeln!(process, "HELLO {}", Self::cfti_escape(&format!("{}", id))),
             ManagerStatusMessage::Tests(scenario, tests) => {
                 write!(process, "TESTS {}", Self::cfti_escape(scenario.id()))?;
