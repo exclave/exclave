@@ -725,6 +725,7 @@ impl UnitManager {
             ManagerControlMessageContents::Scenario(ref new_scenario_name) => {
                 if self.get_scenario_named(new_scenario_name).is_some() {
                     self.select(new_scenario_name);
+                    self.broadcast_selected_scenario();
                 } else {
                     self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unable to find scenario {}", new_scenario_name))));
                 }
@@ -885,10 +886,11 @@ impl UnitManager {
         match *opt {
             None => return,
             Some(ref j) => {
-                let val = j.borrow();
+                let scenario = j.borrow();
                 for (interface_id, _) in self.interfaces.borrow().iter() {
                     let messages = vec![
-                        ManagerStatusMessage::Scenario(Some(val.id().clone()))
+                        ManagerStatusMessage::Scenario(Some(scenario.id().clone())),
+                        ManagerStatusMessage::Tests(scenario.id().clone(), scenario.test_sequence())
                     ];
                     self.send_messages_to(interface_id, messages);
                 }
