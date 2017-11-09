@@ -68,7 +68,7 @@ impl JigDescription {
                     "Description" => {
                         jig_description.description = directive.value().unwrap_or("").to_owned()
                     }
-                    "WorkingDirectory" => {
+                    "WorkingDirectory" | "DefaultWorkingDirectory" => {
                         jig_description.working_directory = match directive.value() {
                             None => None,
                             Some(ps) => Some(PathBuf::from(ps)),
