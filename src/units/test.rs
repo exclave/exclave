@@ -9,6 +9,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::Duration;
@@ -264,30 +265,8 @@ impl TestDescription {
     }
 }
 
-#[derive(PartialEq, Clone)]
-pub enum TestState {
-    /// A test has yet to be run.
-    Pending,
-
-    /// A daemon is waiting for its "match" text to appear.
-    Starting,
-
-    /// A test (or daemon) is in the process of running.
-    Running,
-
-    /// A test (or daemon) passed successfully.
-    Pass,
-
-    /// A test (or daemon) was skipped.
-    Skip,
-
-    /// A test (or daemon) failed for some reason.
-    Fail(String),
-}
-
 pub struct Test {
     description: TestDescription,
-    state: Rc<RefCell<TestState>>,
     program: Rc<RefCell<Option<Running>>>,
 }
 
@@ -295,7 +274,6 @@ impl Test {
     pub fn new(desc: &TestDescription) -> Test {
         Test {
             description: desc.clone(),
-            state: Rc::new(RefCell::new(TestState::Pending)),
             program: Rc::new(RefCell::new(None)),
          }
     }
@@ -327,7 +305,10 @@ impl Test {
         cmd.directory(&Some(config.working_directory(&self.description.working_directory)));
         let mut running = cmd.start()?;
 
-        self.log_output(&ctrl, &mut running);
+        // Keep track of the last line, which we can use to report test status.
+        let last_line = Arc::new(Mutex::new("".to_owned()));
+
+        self.log_output(&ctrl, &mut running, &last_line);
 
         // Keep a waiter around in a separate thread to send that AdvanceScenario message upon completion.
         let thr_waiter = running.waiter();
@@ -335,6 +316,8 @@ impl Test {
         let id = self.id().clone();
         thread::spawn(move || {
             thr_waiter.wait();
+
+            thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(thr_waiter.result(), last_line.lock().unwrap().clone()))).ok();
             thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(thr_waiter.result()))).ok();
         });
 
@@ -344,7 +327,16 @@ impl Test {
     }
 
     pub fn deactivate(&self) -> Result<(), UnitDeactivateError> {
+        if let Some(ref running) = *self.program.borrow_mut() {
+            running.terminate(None).ok();
+        }
         Ok(())
+    }
+
+    /// is_daemon() can be used to determine if a test should be stopped
+    /// now, or when the scenario is finished.
+    pub fn is_daemon(&self) -> bool {
+        self.description.test_type == TestType::Daemon
     }
 
     pub fn id(&self) -> &UnitName {
@@ -359,34 +351,20 @@ impl Test {
         &self.description.description
     }
 
-    pub fn state(&self) -> TestState {
-        self.state.borrow().clone()
-    }
-
-    pub fn skip(&self) {
-        *self.state.borrow_mut() = TestState::Skip;
-    }
-
-    pub fn pending(&self) {
-        *self.state.borrow_mut() = TestState::Pending;
-    }
-
-    pub fn terminate(&self) {
-        unimplemented!();
-    }
-
     pub fn timeout(&self) -> &Option<Duration> {
         &self.description.timeout
     }
 
-    fn log_output(&self, control: &Sender<ManagerControlMessage>, process: &mut Running) {
+    fn log_output(&self, control: &Sender<ManagerControlMessage>, process: &mut Running, last_line: &Arc<Mutex<String>>) {
         
         let stdout = process.take_output();
         let thr_control = control.clone();
+        let thr_last_line = last_line.clone();
         let id = self.id().clone();
         thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 let line = line.expect("Unable to get next line");
+                *thr_last_line.lock().unwrap() = line.clone();
                 if let Err(_) = thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::Log(line))) {
                     break;
                 }
@@ -395,10 +373,12 @@ impl Test {
 
         let stderr = process.take_error();
         let thr_control = control.clone();
+        let thr_last_line = last_line.clone();
         let id = self.id().clone();
         thread::spawn(move || {
             for line in BufReader::new(stderr).lines() {
                 let line = line.expect("Unable to get next line");
+                *thr_last_line.lock().unwrap() = line.clone();
                 if let Err(_) = thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(line))) {
                     break;
                 }

@@ -88,11 +88,18 @@ pub enum ManagerStatusMessage {
     /// A log message from one of the units, or the system itself.
     Log(LogEntry),
 
+    /// Indicates that a test passed successfully.
+    Pass(UnitName, String /* log message */),
+
+    /// Indicates that a test failed for some reason.
+    Fail(UnitName, i32 /* return code */, String /* log message */),
+
     /// Indicates that a test was skipped for some reason.
     Skipped(UnitName, String /* reason */),
 
     /// Sent when a scenario has finished running.
     Finished(UnitName /* Scenario name */, u32 /* Result code */, String /* Reason for finishing */),
+
 }
 
 /// Messages for Unit -> Library communication
@@ -144,7 +151,10 @@ pub enum ManagerControlMessageContents {
     Skip(UnitName, String /* reason */),
 
     /// Indicates that a scenario has finished, and how many tests passed.
-    Finished(u32 /* Finish code */, String /* Informative message */),
+    ScenarioFinished(u32 /* Finish code */, String /* Informative message */),
+
+    /// Indicates that a test has finished
+    TestFinished(i32 /* Finish code */, String /* The last printed line */),
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
@@ -772,7 +782,13 @@ impl UnitManager {
             ManagerControlMessageContents::Skip(ref test_name, ref reason) => {
                 self.broadcast_skipped(test_name, reason);
             }
-            ManagerControlMessageContents::Finished(code, ref message) => {
+            ManagerControlMessageContents::TestFinished(result, ref message) => {
+                self.broadcast_message(match result {
+                    0 => ManagerStatusMessage::Pass(sender_name.clone(), message.clone()),
+                    i => ManagerStatusMessage::Fail(sender_name.clone(), i, message.clone()),
+                });
+            }
+            ManagerControlMessageContents::ScenarioFinished(code, ref message) => {
                 self.broadcast_finished(sender_name, code, message);
             }
             ManagerControlMessageContents::StartTest(ref test_name) => {
@@ -957,6 +973,12 @@ impl UnitManager {
 
     fn broadcast_finished(&self, unit_id: &UnitName, code: u32, message: &String) {
         let msg = ManagerStatusMessage::Finished(unit_id.clone(), code, message.clone());
+        for (interface_id, _) in self.interfaces.borrow().iter() {
+            self.send_messages_to(interface_id, vec![msg.clone()]);
+        }
+    }
+
+    fn broadcast_message(&self, msg: ManagerStatusMessage) {
         for (interface_id, _) in self.interfaces.borrow().iter() {
             self.send_messages_to(interface_id, vec![msg.clone()]);
         }
