@@ -358,6 +358,7 @@ pub struct Scenario {
     state: Rc<RefCell<ScenarioState>>,
 
     /// The current working directory, based on the description, jig, and config.
+    /// Used for PreStart and PostFinish scripts.
     working_directory: Rc<RefCell<PathBuf>>,
 
     /// The dependency graph of tests.
