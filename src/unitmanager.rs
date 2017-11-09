@@ -678,10 +678,6 @@ impl UnitManager {
         self.scenarios.clone()
     }
 
-    pub fn get_current_jig(&self) -> Option<Rc<RefCell<Jig>>> {
-        self.current_jig.borrow().clone()
-    }
-
      pub fn jig_is_loaded(&self, id: &UnitName) -> bool {
         self.jigs.borrow().get(id).is_some()
     }
