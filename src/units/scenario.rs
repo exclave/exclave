@@ -779,6 +779,9 @@ impl Scenario {
             ctrl.send(ManagerControlMessage::new(self.id(),
                                                 ManagerControlMessageContents::StopTest(test.borrow().id().clone()))).ok();
         }
+        // Also stop the scenario.
+        ctrl.send(ManagerControlMessage::new(self.id(),
+                                            ManagerControlMessageContents::StopTest(self.id().clone()))).ok();
         if failures > 0 {
             ctrl.send(ManagerControlMessage::new(self.id(),
                                                 ManagerControlMessageContents::ScenarioFinished(failures + 500, "at least one test failed".to_owned()))).ok();

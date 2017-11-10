@@ -245,23 +245,9 @@ impl TestDescription {
         self.jigs.contains(name)
     }
 
-    /// Determine if a unit is compatible with this system.
-    pub fn is_compatible(&self, manager: &UnitManager, _: &Config) -> Result<(), UnitIncompatibleReason> {
-        if self.jigs.len() == 0 {
-            return Ok(());
-        }
-        for jig_name in &self.jigs {
-            if manager.jig_is_loaded(&jig_name) {
-                return Ok(());
-            }
-        }
-        Err(UnitIncompatibleReason::IncompatibleJig)
-    }
-
     pub fn load(&self, 
-        manager: &UnitManager,
-        config: &Config) -> Result<Test, UnitIncompatibleReason> {
-        self.is_compatible(manager, config)?;
+        _manager: &UnitManager,
+        _config: &Config) -> Result<Test, UnitIncompatibleReason> {
         Ok(Test::new(self))
     }
 }
@@ -279,7 +265,22 @@ impl Test {
          }
     }
 
-    pub fn select(&self) -> Result<(), UnitSelectError> {
+    pub fn select(&self, manager: &UnitManager) -> Result<(), UnitSelectError> {
+        // If there is at least one jig in the description list, then make sure
+        // that jig is loaded.
+        if self.description.jigs.len() > 0 {
+            let mut compatible = false;
+            for jig_name in &self.description.jigs {
+                if manager.jig_is_loaded(&jig_name) {
+                    compatible = true;
+                    break;
+                }
+            }
+            if ! compatible {
+                return Err(UnitSelectError::NoCompatibleJig);
+            }
+        }
+
         Ok(())
     }
 

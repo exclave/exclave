@@ -37,7 +37,7 @@ macro_rules! load {
                 }
                 Err(e) => {
                     $slf.bc.broadcast(
-                        &UnitEvent::Status(UnitStatusEvent::new_unit_incompatible(
+                        &UnitEvent::Status(UnitStatusEvent::new_load_failed(
                             $desc.id(),
                             format!("{}", e),
                         )),
@@ -318,8 +318,8 @@ impl UnitManager {
         *self.current_scenario.borrow_mut() = Some(new_scenario.clone());
 
         // Now select every test associated with the scenario.
-        for test_id in new_scenario.borrow().test_sequence() {
-            //self.tests.borrow().get(test_id).unwrap().borrow().select()
+        for test_id in &new_scenario.borrow().test_sequence() {
+            self.select(test_id);
         }
         Ok(())
     }
@@ -361,7 +361,7 @@ impl UnitManager {
 
     fn select_test(&self, id: &UnitName) -> Result<(), UnitSelectError> { 
         match self.tests.borrow().get(id) {
-            Some(ref s) => s.borrow_mut().select(),
+            Some(ref s) => s.borrow_mut().select(self),
             None => Err(UnitSelectError::UnitNotFound),
         }
     }
@@ -449,7 +449,14 @@ impl UnitManager {
                 }
             }
         }
+
         if let Some(ref old_scenario) = self.current_scenario.borrow_mut().take() {
+            // Deselect every test in this scenario first.
+            for test_id in &old_scenario.borrow().test_sequence() {
+                self.deselect(test_id, "scenario is deselecting");
+            }
+
+            // Deselect the actual scenario
             old_scenario.borrow_mut().deselect()?;
         }
         Ok(())
@@ -798,6 +805,12 @@ impl UnitManager {
                 });
             }
             ManagerControlMessageContents::ScenarioFinished(code, ref message) => {
+                // Deactivate the current scenario.
+                // Since a scenario is finishing, the current scenario MUST not be None.
+                {
+                    let cs = self.current_scenario.borrow();
+                    self.deactivate(cs.as_ref().unwrap().borrow().id(), &message);
+                }
                 self.broadcast_finished(sender_name, code, message);
             }
             ManagerControlMessageContents::StartTest(ref test_name) => {

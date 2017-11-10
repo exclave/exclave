@@ -208,11 +208,17 @@ impl From<DepError<UnitName>> for UnitIncompatibleReason {
 pub enum UnitSelectError {
     /// We tried to select a unit based on its ID, but it wasn't found.
     UnitNotFound,
+
+    /// This unit is for a jig that is not loaded.
+    NoCompatibleJig,
 }
 
 impl fmt::Display for UnitSelectError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "couldn't find unit by ID")
+        match self {
+            &UnitSelectError::UnitNotFound => write!(f, "couldn't find unit by ID"),
+            &UnitSelectError::NoCompatibleJig => write!(f, "couldn't find any compatible jig"),
+        }
     }
 }
 
