@@ -340,9 +340,6 @@ pub enum TestState {
     /// A test has yet to be run.
     Pending,
 
-    /// A daemon is waiting for its "match" text to appear.
-    Starting,
-
     /// A test (or daemon) is in the process of running.
     Running,
 
@@ -700,7 +697,8 @@ impl Scenario {
                 }
                 // Make sure all required dependencies succeeded.
                 else if !self.all_dependencies_succeeded(&test_name) {
-                    ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::Skip(tests[i].borrow().id().clone(), "dependency failed".to_owned()))).ok();
+                    *self.test_states.get(test_name).unwrap().borrow_mut() = TestState::Skip;
+                    ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::Skip(test_name.clone(), "dependency failed".to_owned()))).ok();
                     false
                 } else {
                     true
