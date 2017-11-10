@@ -308,6 +308,10 @@ impl Test {
         // Keep track of the last line, which we can use to report test status.
         let last_line = Arc::new(Mutex::new("".to_owned()));
 
+        if self.description.test_type == TestType::Daemon {
+            
+        }
+
         self.log_output(&ctrl, &mut running, &last_line);
 
         // Keep a waiter around in a separate thread to send that AdvanceScenario message upon completion.
