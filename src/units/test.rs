@@ -308,7 +308,15 @@ impl Test {
             cmd.timeout(timeout);
         }
         cmd.directory(&Some(config.working_directory(&self.description.working_directory)));
-        let mut running = cmd.start()?;
+        let mut running = match cmd.start() {
+            Ok(r) => r,
+            Err(e) => {
+                ctrl.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(format!("unable to start test: {:?}", e)))).unwrap();
+                ctrl.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(-3, format!("unable to start test: {:?}", e)))).ok();
+                ctrl.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(-3))).ok();
+                return Err(UnitActivateError::ExecFailed(e));
+            }
+        };
 
         // Keep track of the last line, which we can use to report test status.
         let last_line = Arc::new(Mutex::new("".to_owned()));
