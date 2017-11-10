@@ -18,7 +18,7 @@ use self::dependy::Dependency;
 use self::humantime::{parse_duration, DurationError};
 use self::regex::Regex;
 use self::runny::Runny;
-use self::runny::running::Running;
+use self::runny::running::{Running, RunningWaiter};
 use self::systemd_parser::items::DirectiveEntry;
 
 use config::Config;
@@ -267,7 +267,7 @@ impl TestDescription {
 
 pub struct Test {
     description: TestDescription,
-    program: Rc<RefCell<Option<Running>>>,
+    program: Rc<RefCell<Option<RunningWaiter>>>,
 }
 
 impl Test {
@@ -308,31 +308,35 @@ impl Test {
         // Keep track of the last line, which we can use to report test status.
         let last_line = Arc::new(Mutex::new("".to_owned()));
 
-        if self.description.test_type == TestType::Daemon {
-            
-        }
-
-        self.log_output(&ctrl, &mut running, &last_line);
-
-        // Keep a waiter around in a separate thread to send that AdvanceScenario message upon completion.
-        let thr_waiter = running.waiter();
+        let waiter = running.waiter();
         let thr_control = ctrl.clone();
+        let thr_last_line = last_line.clone();
         let id = self.id().clone();
-        thread::spawn(move || {
-            thr_waiter.wait();
+        match self.description.test_type {
+            TestType::Daemon => {
+                thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(running.result(), thr_last_line.lock().unwrap().clone()))).ok();
 
-            thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(thr_waiter.result(), last_line.lock().unwrap().clone()))).ok();
-            thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(thr_waiter.result()))).ok();
-        });
+            },
+            TestType::Simple => {
 
-        *self.program.borrow_mut() = Some(running);
+                // Keep a waiter around in a separate thread to send that AdvanceScenario message upon completion.
+                self.log_output(&ctrl, &mut running, last_line);
+                thread::spawn(move || {
+                    running.wait().ok();
+
+                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(running.result(), thr_last_line.lock().unwrap().clone()))).ok();
+                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(running.result()))).ok();
+                });
+            }
+        }
+        *self.program.borrow_mut() = Some(waiter);
 
         Ok(())
     }
 
     pub fn deactivate(&self) -> Result<(), UnitDeactivateError> {
         if let Some(ref running) = *self.program.borrow_mut() {
-            running.terminate(None).ok();
+            running.terminate(&None);
         }
         Ok(())
     }
@@ -359,7 +363,7 @@ impl Test {
         &self.description.timeout
     }
 
-    fn log_output(&self, control: &Sender<ManagerControlMessage>, process: &mut Running, last_line: &Arc<Mutex<String>>) {
+    fn log_output(&self, control: &Sender<ManagerControlMessage>, process: &mut Running, last_line: Arc<Mutex<String>>) {
         
         let stdout = process.take_output();
         let thr_control = control.clone();
@@ -377,12 +381,11 @@ impl Test {
 
         let stderr = process.take_error();
         let thr_control = control.clone();
-        let thr_last_line = last_line.clone();
         let id = self.id().clone();
         thread::spawn(move || {
             for line in BufReader::new(stderr).lines() {
                 let line = line.expect("Unable to get next line");
-                *thr_last_line.lock().unwrap() = line.clone();
+                *last_line.lock().unwrap() = line.clone();
                 if let Err(_) = thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(line))) {
                     break;
                 }

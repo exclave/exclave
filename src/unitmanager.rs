@@ -88,6 +88,9 @@ pub enum ManagerStatusMessage {
     /// A log message from one of the units, or the system itself.
     Log(LogEntry),
 
+    /// A test has started running,
+    Running(UnitName),
+
     /// Indicates that a test passed successfully.
     Pass(UnitName, String /* log message */),
 
@@ -146,6 +149,9 @@ pub enum ManagerControlMessageContents {
 
     /// Stop running a given test.
     StopTest(UnitName),
+
+    /// Sent when a test has started running.
+    TestStarted,
 
     /// Indicates that a test was skipped, and why.
     Skip(UnitName, String /* reason */),
@@ -781,6 +787,9 @@ impl UnitManager {
             },
             ManagerControlMessageContents::Skip(ref test_name, ref reason) => {
                 self.broadcast_skipped(test_name, reason);
+            },
+            ManagerControlMessageContents::TestStarted => {
+                self.broadcast_message(ManagerStatusMessage::Running(sender_name.clone()));
             }
             ManagerControlMessageContents::TestFinished(result, ref message) => {
                 self.broadcast_message(match result {
