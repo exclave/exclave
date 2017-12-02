@@ -193,10 +193,6 @@ impl Jig {
         &self.default_scenario
     }
 
-    pub fn working_directory(&self) -> &Option<PathBuf> {
-        &self.working_directory
-    }
-
     pub fn select(&self) -> Result<(), UnitSelectError> {
         Ok(())
     }

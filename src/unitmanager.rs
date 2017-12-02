@@ -231,10 +231,6 @@ impl UnitManager {
         self.control_sender.clone()
     }
 
-    pub fn get_broadcast_channel(&self) -> UnitBroadcaster {
-        self.bc.clone()
-    }
-
     pub fn load_interface(&self, description: &InterfaceDescription) -> Result<UnitName, ()> {
         load!(self, interfaces, description)
     }
@@ -676,10 +672,6 @@ impl UnitManager {
 
     pub fn get_scenarios(&self) -> Rc<RefCell<HashMap<UnitName, Rc<RefCell<Scenario>>>>> {
         self.scenarios.clone()
-    }
-
-    pub fn get_current_jig(&self) -> Option<Rc<RefCell<Jig>>> {
-        self.current_jig.borrow().clone()
     }
 
      pub fn jig_is_loaded(&self, id: &UnitName) -> bool {
