@@ -281,7 +281,10 @@ impl Interface {
         let process = process_opt.as_mut().unwrap();
 
         match msg {
-            ManagerStatusMessage::Jig(j) => writeln!(process, "JIG {}", Self::cfti_escape(&format!("{}", j))),
+            ManagerStatusMessage::Jig(j) => match j {
+                Some(jig_name) => writeln!(process, "JIG {}", Self::cfti_escape(&format!("{}", jig_name))),
+                None => writeln!(process, "JIG"),
+            },
             ManagerStatusMessage::Hello(id) => writeln!(process, "HELLO {}", Self::cfti_escape(&format!("{}", id))),
             ManagerStatusMessage::Tests(scenario, tests) => {
                 write!(process, "TESTS {}", Self::cfti_escape(scenario.id()))?;
@@ -318,25 +321,25 @@ impl Interface {
                     .replace("\n", "\\n")
                     .replace("\r", "\\r")
             ),
+            ManagerStatusMessage::Running(test) => writeln!(process, "RUNNING {}", test.id()),
             ManagerStatusMessage::Skipped(test, reason) => {
-                writeln!(process, "SKIP {} {}", test, reason)
+                writeln!(process, "SKIP {} {}", test.id(), reason)
             },
             ManagerStatusMessage::Finished(scenario, result, reason) => {
-                writeln!(process, "FINISH {} {} {}", scenario, result, reason)
+                writeln!(process, "FINISH {} {} {}", scenario.id(), result, reason)
             },
-             /*
+            ManagerStatusMessage::Fail(test, _code, reason) => {
+                writeln!(process, "FAIL {} {}", test.id(), reason)
+            }
+            ManagerStatusMessage::Pass(test, reason) => {
+                writeln!(process, "PASS {} {}", test.id(), reason)
+            }             /*
             //            BroadcastMessageContents::Hello(name) => writeln!(stdin,
             //                                                "HELLO {}", name),
             //            BroadcastMessageContents::Ping(val) => writeln!(stdin,
             //                                                "PING {}", val),
             BroadcastMessageContents::Shutdown(reason) => writeln!(stdin, "EXIT {}", reason),
-            BroadcastMessageContents::Running(test) => writeln!(stdin, "RUNNING {}", test),
-            BroadcastMessageContents::Fail(test, reason) => {
-                writeln!(stdin, "FAIL {} {}", test, reason)
-            }
-            BroadcastMessageContents::Pass(test, reason) => {
-                writeln!(stdin, "PASS {} {}", test, reason)
-            }
+
             BroadcastMessageContents::Start(scenario) => writeln!(stdin, "START {}", scenario),
             */
         }

@@ -24,7 +24,7 @@ use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitInc
            UnitName, UnitSelectError, UnitDeselectError};
 use unitmanager::{ManagerControlMessage, ManagerControlMessageContents,
                   UnitManager};
-use units::test::{Test, TestState};
+use units::test::Test;
 
 struct AssumptionDependency {
     name: UnitName,
@@ -335,6 +335,24 @@ enum ScenarioState {
     TestFinished,
 }
 
+#[derive(PartialEq, Clone)]
+pub enum TestState {
+    /// A test has yet to be run.
+    Pending,
+
+    /// A test (or daemon) is in the process of running.
+    Running,
+
+    /// A test (or daemon) passed successfully.
+    Pass,
+
+    /// A test (or daemon) was skipped.
+    Skip,
+
+    /// A test (or daemon) failed for some reason.
+    Fail(String),
+}
+
 pub struct Scenario {
     /// A reference to the scenario description that constructed this test.
     description: ScenarioDescription,
@@ -358,6 +376,7 @@ pub struct Scenario {
     state: Rc<RefCell<ScenarioState>>,
 
     /// The current working directory, based on the description, jig, and config.
+    /// Used for PreStart and PostFinish scripts.
     working_directory: Rc<RefCell<PathBuf>>,
 
     /// The dependency graph of tests.
@@ -447,6 +466,7 @@ impl Scenario {
         }
 
         // Re-assign our working directory.
+        ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::AdvanceScenario(0))).ok();
         config.set_scenario_working_directory(&self.description.working_directory);
         *self.working_directory.borrow_mut() = config.working_directory(&None);
 
@@ -485,8 +505,10 @@ impl Scenario {
                     r => TestState::Fail(format!("test exited with {}", r)),
                 };
                 *self.test_states.get(&test_id).unwrap().borrow_mut() = result;
-                /* XXX Run the test's STOP command */
-                ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::StopTest(test_id))).ok();
+                /* Run the test's STOP command */
+                if ! self.test_sequence[step].borrow().is_daemon() {
+                    ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::StopTest(test_id))).ok();
+                }
             }
             ScenarioState::PreStart => {
                 match last_result {
@@ -606,11 +628,6 @@ impl Scenario {
 
         let new_state = match current_state {
             ScenarioState::Idle => {
-                // Reset the number of errors.
-                *self.failures.borrow_mut() = 0;
-                for test in &self.test_sequence {
-                    test.borrow().pending();
-                }
 
                 //self.broadcast(BroadcastMessageContents::Start(self.id().to_string()));
                 ScenarioState::PreStart
@@ -674,14 +691,14 @@ impl Scenario {
                 } else if let TestState::Fail(ref _x) = *self.exec_start_state.borrow() {
                     // If the preroll command failed, then abort.
                     false
-                } else if tests[i].borrow().state() != TestState::Pending {
+                } else if *self.test_states.get(test_name).unwrap().borrow() != TestState::Pending {
                     // If the test isn't Pending (i.e. if it's skipped or failed), don't run it.
                     false
                 }
                 // Make sure all required dependencies succeeded.
                 else if !self.all_dependencies_succeeded(&test_name) {
-                    tests[i].borrow().skip();
-                    ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::Skip(tests[i].borrow().id().clone(), "dependency failed".to_owned()))).ok();
+                    *self.test_states.get(test_name).unwrap().borrow_mut() = TestState::Skip;
+                    ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::Skip(test_name.clone(), "dependency failed".to_owned()))).ok();
                     false
                 } else {
                     true
@@ -705,12 +722,12 @@ impl Scenario {
                 return true;
             }
 
-            let result = self.tests[parent_name].borrow().state();
+            let result = &*self.test_states.get(test_name).unwrap().borrow();
 
             // If the dependent test did not succeed, then at least
             // one dependency failed.
             // The test may also be Running, in case it's a Daemon.
-            if result != TestState::Pass && result != TestState::Running {
+            if *result != TestState::Pass && *result != TestState::Running {
                 return false;
             }
 
@@ -756,14 +773,19 @@ impl Scenario {
     pub fn finish_scenario(&self, ctrl: &Sender<ManagerControlMessage>) {
         let failures = *self.failures.borrow();
         for test in &self.test_sequence {
-            test.borrow().terminate();
+            // Stop the test.  This will catch normal tests and daemons.
+            ctrl.send(ManagerControlMessage::new(self.id(),
+                                                ManagerControlMessageContents::StopTest(test.borrow().id().clone()))).ok();
         }
+        // Also stop the scenario.
+        ctrl.send(ManagerControlMessage::new(self.id(),
+                                            ManagerControlMessageContents::StopTest(self.id().clone()))).ok();
         if failures > 0 {
             ctrl.send(ManagerControlMessage::new(self.id(),
-                                                ManagerControlMessageContents::Finished(failures + 500, "at least one test failed".to_owned()))).ok();
+                                                ManagerControlMessageContents::ScenarioFinished(failures + 500, "at least one test failed".to_owned()))).ok();
         } else {
             ctrl.send(ManagerControlMessage::new(self.id(),
-                                                ManagerControlMessageContents::Finished(200, "all tests passed".to_owned()))).ok();
+                                                ManagerControlMessageContents::ScenarioFinished(200, "all tests passed".to_owned()))).ok();
         }
     }
 }

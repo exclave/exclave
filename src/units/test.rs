@@ -5,10 +5,12 @@ extern crate runny;
 extern crate systemd_parser;
 
 use std::cell::RefCell;
+use std::error::Error;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::Duration;
@@ -17,7 +19,7 @@ use self::dependy::Dependency;
 use self::humantime::{parse_duration, DurationError};
 use self::regex::Regex;
 use self::runny::Runny;
-use self::runny::running::Running;
+use self::runny::running::{RunningOutput, RunningWaiter};
 use self::systemd_parser::items::DirectiveEntry;
 
 use config::Config;
@@ -243,64 +245,42 @@ impl TestDescription {
         self.jigs.contains(name)
     }
 
-    /// Determine if a unit is compatible with this system.
-    pub fn is_compatible(&self, manager: &UnitManager, _: &Config) -> Result<(), UnitIncompatibleReason> {
-        if self.jigs.len() == 0 {
-            return Ok(());
-        }
-        for jig_name in &self.jigs {
-            if manager.jig_is_loaded(&jig_name) {
-                return Ok(());
-            }
-        }
-        Err(UnitIncompatibleReason::IncompatibleJig)
-    }
-
     pub fn load(&self, 
-        manager: &UnitManager,
-        config: &Config) -> Result<Test, UnitIncompatibleReason> {
-        self.is_compatible(manager, config)?;
+        _manager: &UnitManager,
+        _config: &Config) -> Result<Test, UnitIncompatibleReason> {
         Ok(Test::new(self))
     }
 }
 
-#[derive(PartialEq, Clone)]
-pub enum TestState {
-    /// A test has yet to be run.
-    Pending,
-
-    /// A daemon is waiting for its "match" text to appear.
-    Starting,
-
-    /// A test (or daemon) is in the process of running.
-    Running,
-
-    /// A test (or daemon) passed successfully.
-    Pass,
-
-    /// A test (or daemon) was skipped.
-    Skip,
-
-    /// A test (or daemon) failed for some reason.
-    Fail(String),
-}
-
 pub struct Test {
     description: TestDescription,
-    state: Rc<RefCell<TestState>>,
-    program: Rc<RefCell<Option<Running>>>,
+    program: Rc<RefCell<Option<RunningWaiter>>>,
 }
 
 impl Test {
     pub fn new(desc: &TestDescription) -> Test {
         Test {
             description: desc.clone(),
-            state: Rc::new(RefCell::new(TestState::Pending)),
             program: Rc::new(RefCell::new(None)),
          }
     }
 
-    pub fn select(&self) -> Result<(), UnitSelectError> {
+    pub fn select(&self, manager: &UnitManager) -> Result<(), UnitSelectError> {
+        // If there is at least one jig in the description list, then make sure
+        // that jig is loaded.
+        if self.description.jigs.len() > 0 {
+            let mut compatible = false;
+            for jig_name in &self.description.jigs {
+                if manager.jig_is_loaded(&jig_name) {
+                    compatible = true;
+                    break;
+                }
+            }
+            if ! compatible {
+                return Err(UnitSelectError::NoCompatibleJig);
+            }
+        }
+
         Ok(())
     }
 
@@ -316,6 +296,10 @@ impl Test {
 
         // We'll communicate to the manager through this pipe.
         let ctrl = manager.get_control_channel();
+        let id = self.id().clone();
+
+        // Announce to the world that we've started considering this test.
+        ctrl.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestStarted)).ok();
 
         let cmd = &self.description.exec_start;
         let timeout = &self.description.timeout;
@@ -326,28 +310,104 @@ impl Test {
         }
         cmd.directory(&Some(config.working_directory(&self.description.working_directory)));
         let mut running = match cmd.start() {
-            Ok(o) => o,
-            Err(e) => unimplemented!(),
+            Ok(r) => r,
+            Err(e) => {
+                ctrl.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(format!("unable to start test: {:?}", e)))).unwrap();
+                ctrl.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(-3, format!("unable to start test: {:?}", e)))).ok();
+                ctrl.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(-3))).ok();
+                return Err(UnitActivateError::ExecFailed(e));
+            }
         };
 
-        self.log_output(&ctrl, &mut running);
+        // Keep track of the last line, which we can use to report test status.
+        let last_line = Arc::new(Mutex::new("".to_owned()));
 
-        // Keep a waiter around in a separate thread to send that AdvanceScenario message upon completion.
-        let thr_waiter = running.waiter();
+        let waiter = running.waiter();
         let thr_control = ctrl.clone();
-        let id = self.id().clone();
-        thread::spawn(move || {
-            thr_waiter.wait();
-            thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(thr_waiter.result()))).ok();
-        });
+        let thr_last_line = last_line.clone();
+        match self.description.test_type {
+            TestType::Daemon => {
+                let daemon_ready_string = self.description.test_daemon_ready.clone();
+                
+                thread::spawn(move || {
+                    Self::log_error(&id, &ctrl, running.take_error(), &last_line);
+                    let mut buf_reader = BufReader::new(running.take_output());
+                    if let Some(ref r) = daemon_ready_string {
+                        loop {
+                            let mut line = String::new();
+                            match buf_reader.read_line(&mut line) {
+                                Err(e) => {
+                                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(format!("test daemon raised error: {}", e.description())))).unwrap();
+                                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(-2))).ok();
+                                    running.terminate(Some(Duration::from_secs(1))).ok();
+                                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(-2, thr_last_line.lock().unwrap().clone()))).ok();
+                                    return;
+                                }
+                                Ok(0) => {
+                                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(format!("test daemon exited early")))).unwrap();
+                                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(-1))).ok();
+                                    running.terminate(Some(Duration::from_secs(1))).ok();
+                                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(-1, thr_last_line.lock().unwrap().clone()))).ok();
+                                    return;
+                                }
+                                Ok(_) => {
+                                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::Log(line.clone()))).unwrap();
+                                    if r.is_match(line.as_str()) {
+                                        break;
+                                    }
+                                }
+                            }
+                            line.clear();
+                        }
+                    }
+                    // Log the output normally, now that the daemon has started up.
+                    let thr_thr_control = thr_control.clone();
+                    let thr_thr_last_line = last_line.clone();
+                    let thr_id = id.clone();
+                    thread::spawn(move || {
+                        for line in buf_reader.lines() {
+                            let line = line.expect("Unable to get next line");
+                            *thr_thr_last_line.lock().unwrap() = line.clone();
+                            if let Err(_) = thr_thr_control.send(ManagerControlMessage::new(&thr_id, ManagerControlMessageContents::Log(line))) {
+                                break;
+                            }
+                        }
+                    });
 
-        *self.program.borrow_mut() = Some(running);
+                    // Advance to the next test while this one hangs out.
+                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(running.result()))).ok();
+                    running.wait().ok();
+                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(running.result(), thr_last_line.lock().unwrap().clone()))).ok();
+                });
+            },
+            TestType::Simple => {
+
+                // Keep a waiter around in a separate thread to send that AdvanceScenario message upon completion.
+                Self::log_output(&id, &ctrl, running.take_output(), &last_line);
+                Self::log_error(&id, &ctrl, running.take_error(), &last_line);
+                thread::spawn(move || {
+                    running.wait().ok();
+                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(running.result(), thr_last_line.lock().unwrap().clone()))).ok();
+                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(running.result()))).ok();
+                });
+            }
+        }
+        *self.program.borrow_mut() = Some(waiter);
 
         Ok(())
     }
 
     pub fn deactivate(&self) -> Result<(), UnitDeactivateError> {
+        if let Some(ref running) = *self.program.borrow_mut() {
+            running.terminate(&None);
+        }
         Ok(())
+    }
+
+    /// is_daemon() can be used to determine if a test should be stopped
+    /// now, or when the scenario is finished.
+    pub fn is_daemon(&self) -> bool {
+        self.description.test_type == TestType::Daemon
     }
 
     pub fn id(&self) -> &UnitName {
@@ -362,47 +422,34 @@ impl Test {
         &self.description.description
     }
 
-    pub fn state(&self) -> TestState {
-        self.state.borrow().clone()
-    }
-
-    pub fn skip(&self) {
-        *self.state.borrow_mut() = TestState::Skip;
-    }
-
-    pub fn pending(&self) {
-        *self.state.borrow_mut() = TestState::Pending;
-    }
-
-    pub fn terminate(&self) {
-        unimplemented!();
-    }
-
     pub fn timeout(&self) -> &Option<Duration> {
         &self.description.timeout
     }
 
-    fn log_output(&self, control: &Sender<ManagerControlMessage>, process: &mut Running) {
-        
-        let stdout = process.take_output();
+    fn log_output(id: &UnitName, control: &Sender<ManagerControlMessage>, stdout: RunningOutput, last_line: &Arc<Mutex<String>>) {
         let thr_control = control.clone();
-        let id = self.id().clone();
+        let thr_last_line = last_line.clone();
+        let thr_id = id.clone();
         thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 let line = line.expect("Unable to get next line");
-                if let Err(_) = thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::Log(line))) {
+                *thr_last_line.lock().unwrap() = line.clone();
+                if let Err(_) = thr_control.send(ManagerControlMessage::new(&thr_id, ManagerControlMessageContents::Log(line))) {
                     break;
                 }
             }
         });
+    }
 
-        let stderr = process.take_error();
+    fn log_error(id: &UnitName, control: &Sender<ManagerControlMessage>, stderr: RunningOutput, last_line: &Arc<Mutex<String>>) {
         let thr_control = control.clone();
-        let id = self.id().clone();
+        let thr_last_line = last_line.clone();
+        let thr_id = id.clone();
         thread::spawn(move || {
             for line in BufReader::new(stderr).lines() {
                 let line = line.expect("Unable to get next line");
-                if let Err(_) = thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(line))) {
+                *thr_last_line.lock().unwrap() = line.clone();
+                if let Err(_) = thr_control.send(ManagerControlMessage::new(&thr_id, ManagerControlMessageContents::LogError(line))) {
                     break;
                 }
             }

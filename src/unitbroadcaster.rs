@@ -21,9 +21,6 @@ pub enum UnitStatus {
     /// The unit file failed to load for some reason
     LoadFailed(String /* reason */),
 
-    /// The unit file reported that it was not compatible
-    Incompatible(String /* reason */),
-
     /// The unit file has been loaded from disk, and may be selected.
     Loaded,
 
@@ -67,26 +64,25 @@ pub enum UnitStatus {
 impl fmt::Display for UnitStatus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            &UnitStatus::Added(ref path) => write!(f, "Added file {}", path.to_string_lossy()),
-            &UnitStatus::Updated(ref path) => write!(f, "Updated file {}", path.to_string_lossy()),
-            &UnitStatus::LoadStarted(ref path) => write!(f, "Load started {}", path.to_string_lossy()),
-            &UnitStatus::LoadFailed(ref x) => write!(f, "Load failed: {}", x),
-            &UnitStatus::Incompatible(ref x) => write!(f, "Incompatible: {}", x),
-            &UnitStatus::Loaded => write!(f, "Loaded"),
-            &UnitStatus::Selected => write!(f, "Selected"),
-            &UnitStatus::SelectFailed(ref reason) => write!(f, "Select failed: {}", reason),
-            &UnitStatus::Deselected(ref reason) => write!(f, "Deselected: {}", reason),
-            &UnitStatus::Active => write!(f, "Active"),
-            &UnitStatus::ActivationFailed(ref reason) => write!(f, "Activation failed: {}", reason),
+            &UnitStatus::Added(ref path) => write!(f, "added file {}", path.to_string_lossy()),
+            &UnitStatus::Updated(ref path) => write!(f, "updated file {}", path.to_string_lossy()),
+            &UnitStatus::LoadStarted(ref path) => write!(f, "load started {}", path.to_string_lossy()),
+            &UnitStatus::LoadFailed(ref x) => write!(f, "load failed: {}", x),
+            &UnitStatus::Loaded => write!(f, "loaded"),
+            &UnitStatus::Selected => write!(f, "selected"),
+            &UnitStatus::SelectFailed(ref reason) => write!(f, "select failed: {}", reason),
+            &UnitStatus::Deselected(ref reason) => write!(f, "deselected: {}", reason),
+            &UnitStatus::Active => write!(f, "active"),
+            &UnitStatus::ActivationFailed(ref reason) => write!(f, "activation failed: {}", reason),
             &UnitStatus::DeactivatedSuccessfully(ref x) => {
-                write!(f, "Deactivated successfully: {}", x)
+                write!(f, "deactivated successfully: {}", x)
             }
             &UnitStatus::DeactivatedUnsuccessfully(ref x) => {
-                write!(f, "Deactivated unsuccessfilly: {}", x)
+                write!(f, "deactivated unsuccessfilly: {}", x)
             }
-            &UnitStatus::UnloadStarted(ref path) => write!(f, "Unloading {}", path.to_string_lossy()),
-            &UnitStatus::UpdateStarted(ref path) => write!(f, "Updating {}", path.to_string_lossy()),
-            &UnitStatus::Removed(ref path) => write!(f, "Removed file {}", path.to_string_lossy()),
+            &UnitStatus::UnloadStarted(ref path) => write!(f, "unloading {}", path.to_string_lossy()),
+            &UnitStatus::UpdateStarted(ref path) => write!(f, "updating {}", path.to_string_lossy()),
+            &UnitStatus::Removed(ref path) => write!(f, "removed file {}", path.to_string_lossy()),
         }
     }
 }
@@ -208,13 +204,6 @@ impl UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
             status: UnitStatus::DeactivatedUnsuccessfully(msg),
-        }
-    }
-
-    pub fn new_unit_incompatible(name: &UnitName, msg: String) -> UnitStatusEvent {
-        UnitStatusEvent {
-            name: name.clone(),
-            status: UnitStatus::Incompatible(msg),
         }
     }
 
