@@ -3,10 +3,8 @@ extern crate systemd_parser;
 
 use std::cell::RefCell;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Write, Error, ErrorKind};
+use std::io::{Read, Write, Error, ErrorKind};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Sender;
-use std::thread;
 use std::time::Duration;
 
 use config::Config;
@@ -17,7 +15,7 @@ use unitmanager::{ManagerControlMessage, ManagerControlMessageContents, ManagerS
 
 use self::systemd_parser::items::DirectiveEntry;
 use self::runny::Runny;
-use self::runny::running::{Running, RunningOutput};
+use self::runny::running::Running;
 
 #[derive(Clone, Copy)]
 enum LoggerFormat {
@@ -176,7 +174,7 @@ pub struct Logger {
 }
 
 impl Logger {
-    pub fn new(desc: &LoggerDescription, _: &UnitManager, config: &Config) -> Logger {
+    pub fn new(desc: &LoggerDescription, _: &UnitManager, _config: &Config) -> Logger {
         Logger {
             description: desc.clone(),
             process: RefCell::new(None),
@@ -204,26 +202,12 @@ impl Logger {
                     .directory(&Some(config.working_directory(&self.description.working_directory)))
                     .start()?;
 
-        let stdout = running.take_output();
-        let stderr = running.take_error();
+        // Close stdout and stderr.
+        running.take_output();
+        running.take_error();
 
         let control_sender = manager.get_control_channel();
         let control_sender_id = self.id().clone();
-        match self.description.format {
-            LoggerFormat::TSV => {
-                // Pass control to an out-of-object thread, and shuttle communications
-                // from stdout onto the control_sender channel.
-                let thr_sender_id = control_sender_id.clone();
-                let thr_sender = control_sender.clone();
-                thread::spawn(move || Self::text_read(thr_sender_id, thr_sender, stdout));
-                let thr_sender_id = control_sender_id.clone();
-                let thr_sender = control_sender.clone();
-                thread::spawn(move || Self::text_read_stderr(thr_sender_id, thr_sender, stderr));
-            }
-            LoggerFormat::JSON => {
-                unimplemented!();
-            }
-        };
 
         *self.process.borrow_mut() = Some(running);
 
@@ -278,148 +262,17 @@ impl Logger {
         let process = process_opt.as_mut().unwrap();
 
         match msg {
-            ManagerStatusMessage::Jig(j) => writeln!(process, "JIG {}", Self::cfti_escape(&format!("{}", j))),
-            ManagerStatusMessage::Hello(id) => writeln!(process, "HELLO {}", Self::cfti_escape(&format!("{}", id))),
-            ManagerStatusMessage::Tests(scenario, tests) => {
-                write!(process, "TESTS {}", Self::cfti_escape(scenario.id()))?;
-                for test in &tests {
-                    write!(process, " {}", Self::cfti_escape(test.id()))?;
-                }
-                writeln!(process, "")
-            },
-            ManagerStatusMessage::Scenario(name) => match name {
-                Some(s) => writeln!(process, "SCENARIO {}", Self::cfti_escape(s.id())),
-                None => writeln!(process, "SCENARIO"),
-            },
-            ManagerStatusMessage::Scenarios(list) => {
-                write!(process, "SCENARIOS")?;
-                for scenario_name in list {
-                    write!(process, " {}", Self::cfti_escape(scenario_name.id()))?;
-                }
-                writeln!(process, "")
-            },
-            ManagerStatusMessage::Describe(id, field, value) => {
-                writeln!(process, "DESCRIBE {}", Self::cfti_escape(&format!("{} {} {} {}", id.kind(), field, id.id(), value)))
-            }
             ManagerStatusMessage::Log(l) => writeln!(
                 process,
-                "LOG {}\t{}\t{}\t{}\t{}\t{}",
+                "{}\t{}\t{}\t{}\t{}\t{}",
                 l.kind().as_str(),
-                l.id().id(),
-                l.id().kind(),
+                Self::cfti_escape(l.id().id()),
+                Self::cfti_escape(&format!("{}", l.id().kind())),
                 l.secs(),
                 l.nsecs(),
-                l.message()
-                    .replace("\\", "\\\\")
-                    .replace("\t", "\\t")
-                    .replace("\n", "\\n")
-                    .replace("\r", "\\r")
+                Self::cfti_escape(l.message())
             ),
-            ManagerStatusMessage::Skipped(test, reason) => {
-                writeln!(process, "SKIP {} {}", test, reason)
-            },
-            ManagerStatusMessage::Finished(scenario, result, reason) => {
-                writeln!(process, "FINISH {} {} {}", scenario, result, reason)
-            },
-             /*
-            //            BroadcastMessageContents::Hello(name) => writeln!(stdin,
-            //                                                "HELLO {}", name),
-            //            BroadcastMessageContents::Ping(val) => writeln!(stdin,
-            //                                                "PING {}", val),
-            BroadcastMessageContents::Shutdown(reason) => writeln!(stdin, "EXIT {}", reason),
-            BroadcastMessageContents::Running(test) => writeln!(stdin, "RUNNING {}", test),
-            BroadcastMessageContents::Fail(test, reason) => {
-                writeln!(stdin, "FAIL {} {}", test, reason)
-            }
-            BroadcastMessageContents::Pass(test, reason) => {
-                writeln!(stdin, "PASS {} {}", test, reason)
-            }
-            BroadcastMessageContents::Start(scenario) => writeln!(stdin, "START {}", scenario),
-            */
+            _ => Ok(()),
         }
-    }
-
-    fn cfti_unescape(msg: String) -> String {
-        msg.replace("\\t", "\t")
-            .replace("\\n", "\n")
-            .replace("\\r", "\r")
-            .replace("\\\\", "\\")
-    }
-
-    fn text_read_stderr(id: UnitName, control: Sender<ManagerControlMessage>, output: RunningOutput) {
-        for line in BufReader::new(output).lines() {
-            let line = line.expect("Unable to get next line");
-            // If the send fails, that means the other end has closed the pipe.
-            if let Err(_) = control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(line))) {
-                break;
-            }
-        }
-    }
-
-    fn text_read(id: UnitName, control: Sender<ManagerControlMessage>, stdout: RunningOutput) {
-        for line in BufReader::new(stdout).lines() {
-            let line = line.expect("Unable to get next line");
-            let mut words: Vec<String> = line.split_whitespace()
-                .map(|x| Self::cfti_unescape(x.to_owned()))
-                .collect();
-
-            // Don't crash if we get a blank line.
-            if words.len() == 0 {
-                continue;
-            }
-
-            let verb = words[0].to_lowercase();
-            words.remove(0);
-
-            let response = match verb.as_str() {
-                "scenarios" => ManagerControlMessageContents::Scenarios,
-                "scenario" => match UnitName::from_str(words.get(0).unwrap_or(&"".to_owned()).to_lowercase().as_str(), "scenario") {
-                        Err(e) => ManagerControlMessageContents::Error(format!("Invalid scenario name: {}", e)),
-                        Ok(o) => ManagerControlMessageContents::Scenario(o),
-                    }
-                ,
-                "tests" => {
-                    if words.is_empty() {
-                        ManagerControlMessageContents::Tests(None)
-                    } else {
-                        match UnitName::from_str(words[0].to_lowercase().as_str(), "test") {
-                            Ok(scenario_name) => ManagerControlMessageContents::Tests(Some(scenario_name)),
-                            Err(e) => ManagerControlMessageContents::Error(format!("Invalid test name specified: {}", e)),
-                        }
-                    }
-                },
-                "jig" => ManagerControlMessageContents::Jig,
-                "log" => ManagerControlMessageContents::Log(words.join(" ")),
-                "start" => {
-                    if words.is_empty() {
-                        ManagerControlMessageContents::StartScenario(None)
-                    } else {
-                        match UnitName::from_str(words.get(0).unwrap_or(&"".to_owned()).to_lowercase().as_str(), "scenario") {
-                            Err(e) => ManagerControlMessageContents::Error(format!("Invalid scenario name: {}", e)),
-                            Ok(o) => ManagerControlMessageContents::StartScenario(Some(o)),
-                        }
-                    }
-                }
-                /*
-                "abort" => ControlMessageContents::AbortTests,
-                "pong" => ControlMessageContents::Pong(words[0].to_lowercase()),
-                "hello" => ControlMessageContents::Hello(words.join(" ")),
-                "shutdown" => {
-                    if words.is_empty() {
-                        ControlMessageContents::Shutdown(None)
-                    } else {
-                        ControlMessageContents::Shutdown(Some(words.join(" ")))
-                    }
-                }
-                */
-                v => ManagerControlMessageContents::Unimplemented(v.to_owned(), words.join(" ")),
-            };
-
-            // If the send fails, that means the other end has closed the pipe.
-            if let Err(_) = control.send(ManagerControlMessage::new(&id, response)) {
-                break;
-            }
-        }
-        control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::ChildExited)).expect("logger couldn't send exit message to controller");
     }
 }
