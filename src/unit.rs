@@ -16,10 +16,11 @@ use self::systemd_parser::errors::ParserError;
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone, PartialOrd, Ord)]
 pub enum UnitKind {
+    Interface,
     Jig,
+    Logger,
     Scenario,
     Test,
-    Interface,
 
     /// Exclave-generated types
     Internal,
@@ -28,11 +29,12 @@ pub enum UnitKind {
 impl fmt::Display for UnitKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            &UnitKind::Jig => write!(f, "jig"),
-            &UnitKind::Scenario => write!(f, "scenario"),
-            &UnitKind::Test => write!(f, "test"),
             &UnitKind::Interface => write!(f, "interface"),
             &UnitKind::Internal => write!(f, "internal"),
+            &UnitKind::Jig => write!(f, "jig"),
+            &UnitKind::Logger => write!(f, "logger"),
+            &UnitKind::Scenario => write!(f, "scenario"),
+            &UnitKind::Test => write!(f, "test"),
         }
     }
 }
@@ -86,10 +88,11 @@ impl UnitName {
         // Perform the extension-to-unit-kind mapping.  Reject invalid
         // or unrecognized unit kinds.
         let unit_kind = match extension.as_str() {
+            "interface" => UnitKind::Interface,
             "jig" => UnitKind::Jig,
+            "logger" => UnitKind::Logger,
             "scenario" => UnitKind::Scenario,
             "test" => UnitKind::Test,
-            "interface" => UnitKind::Interface,
             _ => return Err(UnitNameError::UnrecognizedUnitType(extension)),
         };
 

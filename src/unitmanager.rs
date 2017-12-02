@@ -13,6 +13,7 @@ use unit::{UnitName, UnitKind, UnitActivateError, UnitDeactivateError, UnitSelec
 use unitbroadcaster::{UnitBroadcaster, UnitEvent, UnitStatusEvent, UnitStatus, LogEntry};
 use units::interface::{Interface, InterfaceDescription};
 use units::jig::{Jig, JigDescription};
+use units::logger::{Logger, LoggerDescription};
 use units::scenario::{Scenario, ScenarioDescription};
 use units::test::{Test, TestDescription};
 
@@ -172,6 +173,9 @@ pub struct UnitManager {
     /// Loaded Jigs, available for selection and activation.
     jigs: RefCell<HashMap<UnitName, Rc<RefCell<Jig>>>>,
 
+    /// Loaded Loggers.
+    loggers: RefCell<HashMap<UnitName, Rc<RefCell<Logger>>>>,
+
     /// Loaded Scenarios, available for selected and activation.
     scenarios: Rc<RefCell<HashMap<UnitName, Rc<RefCell<Scenario>>>>>,
 
@@ -207,6 +211,7 @@ impl UnitManager {
 
             interfaces: RefCell::new(HashMap::new()),
             jigs: RefCell::new(HashMap::new()),
+            loggers: RefCell::new(HashMap::new()),
             scenarios: Rc::new(RefCell::new(HashMap::new())),
             tests: Rc::new(RefCell::new(HashMap::new())),
 
@@ -235,6 +240,10 @@ impl UnitManager {
         load!(self, interfaces, description)
     }
 
+    pub fn load_logger(&self, description: &LoggerDescription) -> Result<UnitName, ()> {
+        load!(self, loggers, description)
+    }
+
     pub fn load_test(&self, desceription: &TestDescription) -> Result<UnitName, ()> {
         load!(self, tests, desceription)
     }
@@ -256,6 +265,7 @@ impl UnitManager {
         let result = match *id.kind() {
             UnitKind::Interface => self.select_interface(id),
             UnitKind::Jig => self.select_jig(id),
+            UnitKind::Logger => self.select_logger(id),
             UnitKind::Scenario => self.select_scenario(id),
             UnitKind::Test => self.select_test(id),
             UnitKind::Internal => Ok(()),
@@ -356,6 +366,13 @@ impl UnitManager {
         }
     }
 
+    fn select_logger(&self, id: &UnitName) -> Result<(), UnitSelectError> {
+        match self.loggers.borrow().get(id) {
+            Some(ref s) => s.borrow_mut().select(),
+            None => Err(UnitSelectError::UnitNotFound),
+        }
+    }
+
     pub fn deselect(&self, id: &UnitName, reason: &str) {
         self.deactivate(id, "unit is being deselcted");
 
@@ -368,11 +385,12 @@ impl UnitManager {
         // Note that because these are Rcs, they may live on for a little while
         // longer as references in other objects.
         let result = match id.kind() {
-            &UnitKind::Interface => self.deselect_interface(id),
-            &UnitKind::Test => self.deselect_test(id),
-            &UnitKind::Scenario => self.deselect_scenario(id),
-            &UnitKind::Jig => self.deselect_jig(id),
             &UnitKind::Internal => Ok(()),
+            &UnitKind::Interface => self.deselect_interface(id),
+            &UnitKind::Jig => self.deselect_jig(id),
+            &UnitKind::Logger => self.deselect_logger(id),
+            &UnitKind::Scenario => self.deselect_scenario(id),
+            &UnitKind::Test => self.deselect_test(id),
         };
 
         // A not-okay result is fine, it just means we couldn't find the unit.
@@ -391,6 +409,13 @@ impl UnitManager {
 
     fn deselect_interface(&self, id: &UnitName) -> Result<(), UnitDeselectError> {
         match self.interfaces.borrow().get(id) {
+            Some(ref s) => s.borrow_mut().deselect(),
+            None => Err(UnitDeselectError::UnitNotFound),
+        }
+    }
+
+    fn deselect_logger(&self, id: &UnitName) -> Result<(), UnitDeselectError> {
+        match self.loggers.borrow().get(id) {
             Some(ref s) => s.borrow_mut().deselect(),
             None => Err(UnitDeselectError::UnitNotFound),
         }
@@ -454,6 +479,7 @@ impl UnitManager {
         let result = match *id.kind() {
             UnitKind::Interface => self.activate_interface(id),
             UnitKind::Jig => self.activate_jig(id),
+            UnitKind::Logger => self.activate_logger(id),
             UnitKind::Scenario => self.activate_scenario(id),
             UnitKind::Test => self.activate_test(id),
             UnitKind::Internal => Ok(()),
@@ -491,6 +517,14 @@ impl UnitManager {
     fn activate_interface(&self, id: &UnitName) -> Result<(), UnitActivateError> {
         // Activate the interface, which actually starts it up.
         match self.interfaces.borrow().get(id) {
+            Some(i) => i.borrow_mut().activate(self, &*self.cfg.lock().unwrap()),
+            None => return Err(UnitActivateError::UnitNotFound),
+        }
+    }
+
+    fn activate_logger(&self, id: &UnitName) -> Result<(), UnitActivateError> {
+        // Activate the interface, which actually starts it up.
+        match self.loggers.borrow().get(id) {
             Some(i) => i.borrow_mut().activate(self, &*self.cfg.lock().unwrap()),
             None => return Err(UnitActivateError::UnitNotFound),
         }
@@ -545,6 +579,7 @@ impl UnitManager {
         let result = match *id.kind() {
             UnitKind::Interface => self.deactivate_interface(id),
             UnitKind::Jig => self.deactivate_jig(id),
+            UnitKind::Logger => self.deactivate_logger(id),
             UnitKind::Scenario => self.deactivate_scenario(id),
             UnitKind::Test => self.deactivate_test(id),
             UnitKind::Internal => Ok(()),
@@ -563,6 +598,14 @@ impl UnitManager {
     fn deactivate_interface(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
         let interfaces = self.interfaces.borrow();
         match interfaces.get(id) {
+            None => return Err(UnitDeactivateError::UnitNotFound),
+            Some(interface) => interface.borrow_mut().deactivate(),
+        }
+    }
+
+    fn deactivate_logger(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
+        let loggers = self.loggers.borrow();
+        match loggers.get(id) {
             None => return Err(UnitDeactivateError::UnitNotFound),
             Some(interface) => interface.borrow_mut().deactivate(),
         }
@@ -617,6 +660,7 @@ impl UnitManager {
         match *id.kind() {
             UnitKind::Interface => self.unload_interface(id),
             UnitKind::Jig => self.unload_jig(id),
+            UnitKind::Logger => self.unload_logger(id),
             UnitKind::Scenario => self.unload_scenario(id),
             UnitKind::Test => self.unload_test(id),
             UnitKind::Internal => (),
@@ -628,6 +672,13 @@ impl UnitManager {
         self.deselect(id, "interface is being unloaded");
 
         self.interfaces.borrow_mut().remove(id);
+    }
+
+    fn unload_logger(&self, id: &UnitName) {
+        self.deactivate(id, "logger is being unloaded");
+        self.deselect(id, "logger is being unloaded");
+
+        self.loggers.borrow_mut().remove(id);
     }
 
     fn unload_jig(&self, id: &UnitName) {
