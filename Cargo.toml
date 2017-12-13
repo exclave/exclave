@@ -2,6 +2,8 @@
 name = "exclave"
 version = "0.1.0"
 authors = ["Sean Cross <sean@xobs.io>"]
+description = "A frontend for running factory tests"
+license = "BSD"
 
 [dependencies]
 notify = "4.0.1"
