@@ -21,6 +21,7 @@ pub enum UnitKind {
     Logger,
     Scenario,
     Test,
+    Trigger,
 
     /// Exclave-generated types
     Internal,
@@ -35,6 +36,7 @@ impl fmt::Display for UnitKind {
             &UnitKind::Logger => write!(f, "logger"),
             &UnitKind::Scenario => write!(f, "scenario"),
             &UnitKind::Test => write!(f, "test"),
+            &UnitKind::Trigger => write!(f, "trigger"),
         }
     }
 }
@@ -93,6 +95,7 @@ impl UnitName {
             "logger" => UnitKind::Logger,
             "scenario" => UnitKind::Scenario,
             "test" => UnitKind::Test,
+            "trigger" => UnitKind::Trigger,
             _ => return Err(UnitNameError::UnrecognizedUnitType(extension)),
         };
 

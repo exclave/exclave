@@ -14,6 +14,7 @@ use units::jig::{JigDescription};
 use units::logger::LoggerDescription;
 use units::scenario::{ScenarioDescription};
 use units::test::{TestDescription};
+use units::trigger::TriggerDescription;
 
 macro_rules! process_if {
     ($slf:ident, $name:ident, $status:ident, $tstkind:path, $path:ident, $trgt:ident, $desc:ident) => {
@@ -136,12 +137,16 @@ pub struct UnitLibrary {
     /// Currently available test descriptions.  The tests they describe might not be valid.
     test_descriptions: RefCell<HashMap<UnitName, TestDescription>>,
 
+    /// Currently available trigger descriptions.  The triggers they describe might not be valid.
+    trigger_descriptions: RefCell<HashMap<UnitName, TriggerDescription>>,
+
     /// A list of unit names that must be checked when a rescan() is performed.
     dirty_interfaces: RefCell<HashMap<UnitName, ()>>,
     dirty_jigs: RefCell<HashMap<UnitName, ()>>,
     dirty_loggers: RefCell<HashMap<UnitName, ()>>,
     dirty_scenarios: RefCell<HashMap<UnitName, ()>>,
     dirty_tests: RefCell<HashMap<UnitName, ()>>,
+    dirty_triggers: RefCell<HashMap<UnitName, ()>>,
 
     /// The object in charge of keeping track of units in-memory.
     unit_manager: RefCell<UnitManager>,
@@ -158,12 +163,14 @@ impl UnitLibrary {
             logger_descriptions: RefCell::new(HashMap::new()),
             scenario_descriptions: RefCell::new(HashMap::new()),
             test_descriptions: RefCell::new(HashMap::new()),
+            trigger_descriptions: RefCell::new(HashMap::new()),
 
             dirty_interfaces: RefCell::new(HashMap::new()),
             dirty_jigs: RefCell::new(HashMap::new()),
             dirty_loggers: RefCell::new(HashMap::new()),
             dirty_scenarios: RefCell::new(HashMap::new()),
             dirty_tests: RefCell::new(HashMap::new()),
+            dirty_triggers: RefCell::new(HashMap::new()),
 
             unit_manager: RefCell::new(UnitManager::new(broadcaster, config)),
         }
@@ -175,8 +182,9 @@ impl UnitLibrary {
             &UnitKind::Interface => self.dirty_interfaces.borrow_mut().insert(name.clone(), ()),
             &UnitKind::Jig => self.dirty_jigs.borrow_mut().insert(name.clone(), ()),
             &UnitKind::Logger => self.dirty_loggers.borrow_mut().insert(name.clone(), ()),
-            &UnitKind::Test => self.dirty_tests.borrow_mut().insert(name.clone(), ()),
             &UnitKind::Scenario => self.dirty_scenarios.borrow_mut().insert(name.clone(), ()),
+            &UnitKind::Test => self.dirty_tests.borrow_mut().insert(name.clone(), ()),
+            &UnitKind::Trigger => self.dirty_triggers.borrow_mut().insert(name.clone(), ()),
             &UnitKind::Internal => None,
         };
     }
@@ -231,6 +239,14 @@ impl UnitLibrary {
                 .iter() {
                 if logger_description.supports_jig(jig_name) {
                     self.dirty_loggers.borrow_mut().insert(logger_name.clone(), ());
+                }
+            }
+
+            for (trigger_name, trigger_description) in self.trigger_descriptions
+                .borrow()
+                .iter() {
+                if trigger_description.supports_jig(jig_name) {
+                    self.dirty_triggers.borrow_mut().insert(trigger_name.clone(), ());
                 }
             }
         }
@@ -304,6 +320,17 @@ impl UnitLibrary {
                 }
             }
 
+            for (id, _) in self.dirty_triggers.borrow().iter() {
+                match *statuses.get(id).expect("Unable to find dirty trigger in status list") {
+                    UnitStatus::UnloadStarted(_) | UnitStatus::LoadFailed(_) => {
+                        self.trigger_descriptions.borrow_mut().remove(id);
+                        self.unit_manager.borrow_mut().unload(id);
+                        to_remove.push(id.clone());
+                    }
+                    _ => (),
+                }
+            }
+
             for id in to_remove {
                 match *id.kind() {
                     UnitKind::Interface => self.dirty_interfaces.borrow_mut().remove(&id),
@@ -311,6 +338,7 @@ impl UnitLibrary {
                     UnitKind::Logger => self.dirty_loggers.borrow_mut().remove(&id),
                     UnitKind::Scenario => self.dirty_scenarios.borrow_mut().remove(&id),
                     UnitKind::Test => self.dirty_tests.borrow_mut().remove(&id),
+                    UnitKind::Trigger => self.dirty_triggers.borrow_mut().remove(&id),
                     UnitKind::Internal => None,
                 };
                 statuses.remove(&id);
@@ -326,22 +354,28 @@ impl UnitLibrary {
         // 6. Load all loggers that are compatible with this Jig.
         load_units_for_activation!(self, statuses, dirty_loggers, logger_descriptions, load_logger);
 
-        // 7. Load all Tests that are compatible with this Jig.
+        // 7. Load all Triggers that are compatible with this Jig.
+        load_units_for_activation!(self, statuses, dirty_triggers, trigger_descriptions, load_trigger);
+
+        // 8. Load all Tests that are compatible with this Jig.
         load_units!(self, statuses, dirty_tests, test_descriptions, load_test);
 
-        // 8. Load all Scenarios that are compatible with this Jig.
+        // 9. Load all Scenarios that are compatible with this Jig.
         load_units!(self, statuses, dirty_scenarios, scenario_descriptions, load_scenario);
 
-        // 9. Activate all jigs that were just loaded.
+        // 10. Activate all jigs that were just loaded.
         select_and_activate_units!(self, dirty_jigs);
 
-        // 10. Activate all interfaces that were just loaded.
+        // 11. Activate all interfaces that were just loaded.
         select_and_activate_units!(self, dirty_interfaces);
 
         // 11. Activate all loggers that were just loaded.
         select_and_activate_units!(self, dirty_loggers);
 
-        // 12. Prepare any defaults that need loading (i.e. jigs, scenarios, etc.)
+        // 12. Activate all triggers that were just loaded.
+        select_and_activate_units!(self, dirty_triggers);
+
+        // 13. Prepare any defaults that need loading (i.e. jigs, scenarios, etc.)
         self.unit_manager.borrow_mut().refresh_defaults();
 
         self.broadcaster.broadcast(&UnitEvent::RescanFinish);
@@ -359,13 +393,14 @@ impl UnitLibrary {
                         process_if!(self, name, status, UnitKind::Jig, path, JigDescription, jig_descriptions);
                         process_if!(self, name, status, UnitKind::Scenario, path, ScenarioDescription, scenario_descriptions);
                         process_if!(self, name, status, UnitKind::Test, path, TestDescription, test_descriptions);
+                        process_if!(self, name, status, UnitKind::Trigger, path, TriggerDescription, trigger_descriptions);
                     }
                     &UnitStatus::UpdateStarted(ref path) => {
                         process_if!(self, name, status, UnitKind::Interface, path, InterfaceDescription, interface_descriptions);
                         process_if!(self, name, status, UnitKind::Jig, path, JigDescription, jig_descriptions);
                         process_if!(self, name, status, UnitKind::Logger, path, LoggerDescription, logger_descriptions);
                         process_if!(self, name, status, UnitKind::Scenario, path, ScenarioDescription, scenario_descriptions);
-                        process_if!(self, name, status, UnitKind::Test, path, TestDescription, test_descriptions);
+                        process_if!(self, name, status, UnitKind::Trigger, path, TriggerDescription, trigger_descriptions);
                     }
                     &UnitStatus::UnloadStarted(ref path) => {
                         self.unit_status

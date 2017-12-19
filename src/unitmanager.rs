@@ -16,6 +16,7 @@ use units::jig::{Jig, JigDescription};
 use units::logger::{Logger, LoggerDescription};
 use units::scenario::{Scenario, ScenarioDescription};
 use units::test::{Test, TestDescription};
+use units::trigger::{Trigger, TriggerDescription};
 
 macro_rules! load {
     ($slf:ident, $dest:ident, $desc:ident) => {
@@ -198,6 +199,9 @@ pub struct UnitManager {
     /// Loaded Tests, available for selection and activation.
     tests: Rc<RefCell<HashMap<UnitName, Rc<RefCell<Test>>>>>,
 
+    /// Loaded Triggers, available for selection and activation.
+    triggers: Rc<RefCell<HashMap<UnitName, Rc<RefCell<Trigger>>>>>,
+
     /// Prototypical message sender that will be cloned and passed to each new unit.
     control_sender: Sender<ManagerControlMessage>,
 
@@ -230,6 +234,7 @@ impl UnitManager {
             loggers: RefCell::new(HashMap::new()),
             scenarios: Rc::new(RefCell::new(HashMap::new())),
             tests: Rc::new(RefCell::new(HashMap::new())),
+            triggers: Rc::new(RefCell::new(HashMap::new())),
 
             selected: Rc::new(RefCell::new(HashMap::new())),
             active: Rc::new(RefCell::new(HashMap::new())),
@@ -272,6 +277,10 @@ impl UnitManager {
         load!(self, scenarios, desceription)
     }
 
+    pub fn load_trigger(&self, desceription: &TriggerDescription) -> Result<UnitName, UnitIncompatibleReason> {
+        load!(self, triggers, desceription)
+    }
+
     pub fn select(&self, id: &UnitName) {
         // Don't select already-selected units.
         if self.selected.borrow().contains_key(id) {
@@ -284,6 +293,7 @@ impl UnitManager {
             UnitKind::Logger => self.select_logger(id),
             UnitKind::Scenario => self.select_scenario(id),
             UnitKind::Test => self.select_test(id),
+            UnitKind::Trigger => self.select_trigger(id),
             UnitKind::Internal => Ok(()),
         };
 
@@ -383,6 +393,13 @@ impl UnitManager {
         }
     }
 
+    fn select_trigger(&self, id: &UnitName) -> Result<(), UnitSelectError> {
+        match self.triggers.borrow().get(id) {
+            Some(ref s) => s.borrow_mut().select(),
+            None => Err(UnitSelectError::UnitNotFound),
+        }
+    }
+
     fn select_logger(&self, id: &UnitName) -> Result<(), UnitSelectError> {
         match self.loggers.borrow().get(id) {
             Some(ref s) => s.borrow_mut().select(),
@@ -408,6 +425,7 @@ impl UnitManager {
             &UnitKind::Logger => self.deselect_logger(id),
             &UnitKind::Scenario => self.deselect_scenario(id),
             &UnitKind::Test => self.deselect_test(id),
+            &UnitKind::Trigger => self.deselect_trigger(id),
         };
 
         // A not-okay result is fine, it just means we couldn't find the unit.
@@ -426,6 +444,13 @@ impl UnitManager {
 
     fn deselect_interface(&self, id: &UnitName) -> Result<(), UnitDeselectError> {
         match self.interfaces.borrow().get(id) {
+            Some(ref s) => s.borrow_mut().deselect(),
+            None => Err(UnitDeselectError::UnitNotFound),
+        }
+    }
+
+    fn deselect_trigger(&self, id: &UnitName) -> Result<(), UnitDeselectError> {
+        match self.triggers.borrow().get(id) {
             Some(ref s) => s.borrow_mut().deselect(),
             None => Err(UnitDeselectError::UnitNotFound),
         }
@@ -506,6 +531,7 @@ impl UnitManager {
             UnitKind::Logger => self.activate_logger(id),
             UnitKind::Scenario => self.activate_scenario(id),
             UnitKind::Test => self.activate_test(id),
+            UnitKind::Trigger => self.activate_trigger(id),
             UnitKind::Internal => Ok(()),
         };
 
@@ -541,6 +567,14 @@ impl UnitManager {
     fn activate_interface(&self, id: &UnitName) -> Result<(), UnitActivateError> {
         // Activate the interface, which actually starts it up.
         match self.interfaces.borrow().get(id) {
+            Some(i) => i.borrow_mut().activate(self, &*self.cfg.lock().unwrap()),
+            None => return Err(UnitActivateError::UnitNotFound),
+        }
+    }
+
+    fn activate_trigger(&self, id: &UnitName) -> Result<(), UnitActivateError> {
+        // Activate the interface, which actually starts it up.
+        match self.triggers.borrow().get(id) {
             Some(i) => i.borrow_mut().activate(self, &*self.cfg.lock().unwrap()),
             None => return Err(UnitActivateError::UnitNotFound),
         }
@@ -606,6 +640,7 @@ impl UnitManager {
             UnitKind::Logger => self.deactivate_logger(id),
             UnitKind::Scenario => self.deactivate_scenario(id),
             UnitKind::Test => self.deactivate_test(id),
+            UnitKind::Trigger => self.deactivate_trigger(id),
             UnitKind::Internal => Ok(()),
         };
         match result {
@@ -624,6 +659,14 @@ impl UnitManager {
         match interfaces.get(id) {
             None => return Err(UnitDeactivateError::UnitNotFound),
             Some(interface) => interface.borrow_mut().deactivate(),
+        }
+    }
+
+    fn deactivate_trigger(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
+        let triggers = self.triggers.borrow();
+        match triggers.get(id) {
+            None => return Err(UnitDeactivateError::UnitNotFound),
+            Some(trigger) => trigger.borrow_mut().deactivate(),
         }
     }
 
@@ -687,6 +730,7 @@ impl UnitManager {
             UnitKind::Logger => self.unload_logger(id),
             UnitKind::Scenario => self.unload_scenario(id),
             UnitKind::Test => self.unload_test(id),
+            UnitKind::Trigger => self.unload_trigger(id),
             UnitKind::Internal => (),
         }
     }
@@ -696,6 +740,13 @@ impl UnitManager {
         self.deselect(id, "interface is being unloaded");
 
         self.interfaces.borrow_mut().remove(id);
+    }
+    
+    fn unload_trigger(&self, id: &UnitName) {
+        self.deactivate(id, "trigger is being unloaded");
+        self.deselect(id, "trigger is being unloaded");
+
+        self.triggers.borrow_mut().remove(id);
     }
 
     fn unload_logger(&self, id: &UnitName) {
