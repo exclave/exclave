@@ -112,8 +112,7 @@ fn main() {
             use std::io::Write;
             use std::time;
 
-            let now = time::SystemTime::now();
-            let now = match now.duration_since(time::UNIX_EPOCH) {
+            let now = match time::SystemTime::now().duration_since(time::UNIX_EPOCH) {
                 Ok(d) => d,
                 Err(_) => time::Duration::new(0, 0),
             };
