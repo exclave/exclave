@@ -281,7 +281,7 @@ impl Trigger {
                         if words.len() > 0 {
                             match UnitName::from_str(&words[0], "test") {
                                 Ok(name) => ManagerControlMessageContents::StartScenario(Some(name)),
-                                Err(e) => ManagerControlMessageContents::Unimplemented(words[0].clone(), "name could not be decoded".to_owned()),
+                                Err(_) => ManagerControlMessageContents::Unimplemented(words[0].clone(), "name could not be decoded".to_owned()),
                             }
                         } else {
                             ManagerControlMessageContents::StartScenario(None)
