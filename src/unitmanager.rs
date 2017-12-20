@@ -813,6 +813,10 @@ impl UnitManager {
                     let log_status_msg = ManagerStatusMessage::Log(log.clone());
                     interface.borrow().output_message(log_status_msg).expect("Unable to pass message to client");
                 }
+                for (_, logger) in self.loggers.borrow().iter() {
+                    let log_status_msg = ManagerStatusMessage::Log(log.clone());
+                    logger.borrow().output_message(log_status_msg).expect("Unable to pass message to client");
+                }
             },
             _ => (),
         }
