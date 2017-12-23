@@ -466,11 +466,10 @@ impl Scenario {
         }
 
         // Re-assign our working directory.
-        ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::AdvanceScenario(0))).ok();
         config.set_scenario_working_directory(&self.description.working_directory);
         *self.working_directory.borrow_mut() = config.working_directory(&None);
 
-        // Cause the scenario to move to the next phase.
+        // Cause the scenario to move to the next (i.e. first) phase.
         ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::AdvanceScenario(0))).ok();
 
         Ok(())
