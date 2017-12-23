@@ -809,13 +809,21 @@ impl UnitManager {
             &UnitEvent::ManagerRequest(ref req) => self.manager_request(req),
             &UnitEvent::Status(ref stat) => self.status_message(stat),
             &UnitEvent::Log(ref log) => {
-                for (_, interface) in self.interfaces.borrow().iter() {
+                let mut units_to_deactivate = vec![];
+                for (interface_id, interface) in self.interfaces.borrow().iter() {
                     let log_status_msg = ManagerStatusMessage::Log(log.clone());
-                    interface.borrow().output_message(log_status_msg).expect("Unable to pass message to client");
+                    if let Err(e) = interface.borrow().output_message(log_status_msg) {
+                        units_to_deactivate.push((interface_id.clone(), format!("unable to send message to interface: {:?}", e)));
+                    }
                 }
-                for (_, logger) in self.loggers.borrow().iter() {
+                for (logger_id, logger) in self.loggers.borrow().iter() {
                     let log_status_msg = ManagerStatusMessage::Log(log.clone());
-                    logger.borrow().output_message(log_status_msg).expect("Unable to pass message to client");
+                    if let Err(e) = logger.borrow().output_message(log_status_msg) {
+                        units_to_deactivate.push((logger_id.clone(), format!("unable to send message to logger: {:?}", e)));
+                    }
+                }
+                for (unit_id, reason) in units_to_deactivate {
+                    self.deactivate(&unit_id, &reason);
                 }
             },
             _ => (),
