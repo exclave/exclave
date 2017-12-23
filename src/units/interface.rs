@@ -311,28 +311,24 @@ impl Interface {
                 process,
                 "LOG {}\t{}\t{}\t{}\t{}\t{}",
                 l.kind().as_str(),
-                l.id().id(),
+                Self::cfti_escape(l.id().id()),
                 l.id().kind(),
                 l.secs(),
                 l.nsecs(),
-                l.message()
-                    .replace("\\", "\\\\")
-                    .replace("\t", "\\t")
-                    .replace("\n", "\\n")
-                    .replace("\r", "\\r")
+                Self::cfti_escape(l.message())
             ),
-            ManagerStatusMessage::Running(test) => writeln!(process, "RUNNING {}", test.id()),
+            ManagerStatusMessage::Running(test) => writeln!(process, "RUNNING {}", Self::cfti_escape(test.id())),
             ManagerStatusMessage::Skipped(test, reason) => {
-                writeln!(process, "SKIP {} {}", test.id(), reason)
+                writeln!(process, "SKIP {} {}", Self::cfti_escape(test.id()), Self::cfti_escape(&reason))
             },
             ManagerStatusMessage::Finished(scenario, result, reason) => {
-                writeln!(process, "FINISH {} {} {}", scenario.id(), result, reason)
+                writeln!(process, "FINISH {} {} {}", Self::cfti_escape(scenario.id()), result, Self::cfti_escape(&reason))
             },
             ManagerStatusMessage::Fail(test, _code, reason) => {
-                writeln!(process, "FAIL {} {}", test.id(), reason)
+                writeln!(process, "FAIL {} {}",Self::cfti_escape(test.id()), Self::cfti_escape(&reason))
             }
             ManagerStatusMessage::Pass(test, reason) => {
-                writeln!(process, "PASS {} {}", test.id(), reason)
+                writeln!(process, "PASS {} {}", Self::cfti_escape(test.id()), Self::cfti_escape(&reason))
             }             /*
             //            BroadcastMessageContents::Hello(name) => writeln!(stdin,
             //                                                "HELLO {}", name),
