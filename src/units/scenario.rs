@@ -502,7 +502,10 @@ impl Scenario {
                 let test_id = self.test_sequence[step].borrow().id().clone();
                 let result = match last_result {
                     0 => TestState::Pass,
-                    r => TestState::Fail(format!("test exited with {}", r)),
+                    r => {
+                        *self.failures.borrow_mut() += 1;
+                        TestState::Fail(format!("test exited with {}", r))
+                    },
                 };
                 *self.test_states.get(&test_id).unwrap().borrow_mut() = result;
                 /* Run the test's STOP command */
@@ -513,7 +516,10 @@ impl Scenario {
             ScenarioState::PreStart => {
                 match last_result {
                     0 => *self.exec_start_state.borrow_mut() = TestState::Pass,
-                    r => *self.exec_start_state.borrow_mut() = TestState::Fail(format!("test exited with {}", r)),
+                    r => *self.exec_start_state.borrow_mut() = {
+                        *self.failures.borrow_mut() += 1;
+                        TestState::Fail(format!("test exited with {}", r))
+                    },
                 }
             }
             _ => (),
@@ -539,7 +545,6 @@ impl Scenario {
                 let test_timeout = test.timeout();
                 let test_max_time = self.make_timeout(test_timeout);
                 ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::StartTest(test.id().clone()))).ok();
-                //test.start(&*self.working_directory.lock().unwrap(), test_max_time);
             }
             ScenarioState::PostSuccess => {
                 let cmd = &self.description.exec_stop_success.clone().unwrap();
