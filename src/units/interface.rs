@@ -346,10 +346,19 @@ impl Interface {
     }
 
     fn cfti_unescape(msg: String) -> String {
-        msg.replace("\\t", "\t")
-            .replace("\\n", "\n")
-            .replace("\\r", "\r")
-            .replace("\\\\", "\\")
+        let mut out = String::new();
+        let mut was_bs = false;
+
+        for c in msg.chars() {
+            was_bs = match c {
+                '\\' => if was_bs { out.push('\\'); false } else { true },
+                't' => { out.push(if was_bs { '\t' } else { 't' }); false },
+                'r' => { out.push(if was_bs { '\r' } else { 'r' }); false },
+                'n' => { out.push(if was_bs { '\n' } else { 'n' }); false },
+                _ => {out.push(c); false },
+            };
+        }
+        out
     }
 
     fn text_read_stderr(id: UnitName, control: Sender<ManagerControlMessage>, output: RunningOutput) {
