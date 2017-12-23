@@ -3,19 +3,21 @@ extern crate systemd_parser;
 
 use std::cell::RefCell;
 use std::fs::File;
-use std::io::{Read, Write, Error, ErrorKind};
+use std::io::{BufRead, BufReader, Error, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::Sender;
 use std::time::Duration;
+use std::thread;
 
 use config::Config;
-use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason, UnitSelectError, UnitDeselectError,
-           UnitName};
+use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitDeselectError,
+           UnitIncompatibleReason, UnitName, UnitSelectError};
 use unitmanager::{ManagerControlMessage, ManagerControlMessageContents, ManagerStatusMessage,
                   UnitManager};
 
 use self::systemd_parser::items::DirectiveEntry;
 use self::runny::Runny;
-use self::runny::running::Running;
+use self::runny::running::{Running, RunningOutput};
 
 #[derive(Clone, Copy)]
 enum LoggerFormat {
@@ -78,12 +80,9 @@ impl LoggerDescription {
         for entry in unit_file.lookup_by_category("Logger") {
             match entry {
                 &DirectiveEntry::Solo(ref directive) => match directive.key() {
-                    "Name" => {
-                        logger_description.name = directive.value().unwrap_or("").to_owned()
-                    }
+                    "Name" => logger_description.name = directive.value().unwrap_or("").to_owned(),
                     "Description" => {
-                        logger_description.description =
-                            directive.value().unwrap_or("").to_owned()
+                        logger_description.description = directive.value().unwrap_or("").to_owned()
                     }
                     "Jigs" => {
                         logger_description.jigs = match directive.value() {
@@ -193,18 +192,41 @@ impl Logger {
         Ok(())
     }
 
+    fn text_read(id: UnitName, control: Sender<ManagerControlMessage>, output: RunningOutput) {
+        for line in BufReader::new(output).lines() {
+            let line = line.expect("Unable to get next line");
+            // If the send fails, that means the other end has closed the pipe.
+            if let Err(_) = control.send(ManagerControlMessage::new(
+                &id,
+                ManagerControlMessageContents::LogError(line),
+            )) {
+                break;
+            }
+        }
+    }
+
     pub fn activate(
         &self,
         manager: &UnitManager,
         config: &Config,
     ) -> Result<(), UnitActivateError> {
         let mut running = Runny::new(self.description.exec_start.as_str())
-                    .directory(&Some(config.working_directory(&self.description.working_directory)))
-                    .start()?;
+            .directory(&Some(
+                config.working_directory(&self.description.working_directory),
+            ))
+            .start()?;
 
-        // Close stdout and stderr.
-        running.take_output();
-        running.take_error();
+        // Have stdout and stderr log their output.
+        let control_sender = manager.get_control_channel();
+        let control_sender_id = self.id().clone();
+        let stdout = running.take_output();
+        let stderr = running.take_error();
+        let thr_sender_id = control_sender_id.clone();
+        let thr_sender = control_sender.clone();
+        thread::spawn(move || Self::text_read(thr_sender_id, thr_sender, stdout));
+        thread::spawn(move || {
+            Self::text_read(control_sender_id, control_sender, stderr)
+        });
 
         let control_sender = manager.get_control_channel();
         let control_sender_id = self.id().clone();
@@ -212,7 +234,12 @@ impl Logger {
         *self.process.borrow_mut() = Some(running);
 
         // Send some initial configuration to the client.
-        control_sender.send(ManagerControlMessage::new(&control_sender_id, ManagerControlMessageContents::InitialGreeting)).ok();
+        control_sender
+            .send(ManagerControlMessage::new(
+                &control_sender_id,
+                ManagerControlMessageContents::InitialGreeting,
+            ))
+            .ok();
 
         Ok(())
     }
@@ -226,8 +253,7 @@ impl Logger {
                 },
                 Err(e) => Err(UnitDeactivateError::RunningError(e)),
             }
-        }
-        else {
+        } else {
             Ok(())
         }
     }
