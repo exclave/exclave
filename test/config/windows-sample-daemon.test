@@ -1,0 +1,8 @@
+[Test]
+Name=Sample Windows daemon
+Description=Run stuff in a loop as a daemon
+ExecStart=powershell .\\windows-test-daemon.ps1
+Type=daemon
+DaemonReadyText=daemon ready
+Jigs=windows
+Timeout=3

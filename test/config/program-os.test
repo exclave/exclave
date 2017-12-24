@@ -1,0 +1,6 @@
+[Test]
+ExecStart=program-os
+Name=Program OS
+Description=Program the base LtC operating system.
+Requires=log-registers
+Timeout=2000

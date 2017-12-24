@@ -1,0 +1,10 @@
+[Test]
+ExecStart=swdlog
+Name=Log Registers
+Description=Log registers from the chip, to e.g. remember serial numbers
+Requires=start-swd
+Timeout=2000
+
+[Args]
+sim_uidmh=0x40048058
+sim_uidml=0x4004805c

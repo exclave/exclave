@@ -1,0 +1,4 @@
+[Test]
+Name=Print Working Directory
+Description=Print the current directory path
+ExecStart=cmd /c cd

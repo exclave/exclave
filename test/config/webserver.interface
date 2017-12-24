@@ -1,0 +1,6 @@
+[Interface]
+Name=Web Server
+Description=Runs a web server on port 3000
+Format=text
+ExecStart=cargo run -- -p 3000 -a 0.0.0.0
+WorkingDirectory=../jig-20-interface-http

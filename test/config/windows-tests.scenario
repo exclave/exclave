@@ -1,0 +1,6 @@
+[Scenario]
+Name=Basic Windows Tests
+Description=Test some Jig20 stuff on Windows
+Tests=windows-sample-daemon, pwd, dir, check-c-size
+Timeout=200
+Jigs=windows

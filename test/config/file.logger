@@ -1,0 +1,7 @@
+[Logger]
+Name=File Logger
+Description=Write log messages out to a file
+ExecStart=cargo run -- ../exclave/file-log.json
+Format=tsv
+WorkingDirectory=../jig-20-file-logger
+Jigs=windows

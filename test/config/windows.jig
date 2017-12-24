@@ -1,0 +1,6 @@
+[Jig]
+Name=Windows Jig
+Description=Development Jig running on Windows
+TestFile=C:\\.
+DefaultScenario=windows-tests
+DefaultWorkingDirectory=test\\wintests

@@ -1,0 +1,9 @@
+[Test]
+ExecStart=program-app
+Name=Program Test App
+Description=Program the LtC test application.
+Requires=program-os
+Timeout=2000
+
+[Exec]
+arg0=test.bin

@@ -1,0 +1,5 @@
+[Test]
+Name=Check C: free space
+Description=Check the amount of free space on the C: drive to be sure it's at least 1000 MB
+ExecStart=powershell .\\check-c-size.ps1
+#ExecStart=cmd /c cd

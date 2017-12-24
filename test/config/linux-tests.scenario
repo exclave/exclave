@@ -1,0 +1,6 @@
+[Scenario]
+Name=Basic Linux Tests
+Description=Test some Jig20 stuff on Windows
+Tests=pwd, ls, check-root-size
+Timeout=200
+Jigs=linux

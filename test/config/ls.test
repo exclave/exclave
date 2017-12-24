@@ -1,0 +1,4 @@
+[Test]
+Name=List directory
+Description=List files in the current directory
+ExecStart=/bin/ls

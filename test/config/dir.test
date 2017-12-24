@@ -1,0 +1,5 @@
+[Test]
+Name=List directory
+Description=List files in the current directory
+ExecStart=cmd /C dir
+Requires=windows-sample-daemon

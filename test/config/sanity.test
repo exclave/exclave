@@ -1,0 +1,7 @@
+[Test]
+ExecStart=echotest
+Name=Echo values
+Description=Echo some values out to the screen
+Requires=start-swd
+Jigs=windows
+Timeout=2000

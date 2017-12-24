@@ -1,0 +1,6 @@
+[Test]
+ExecStart=start-openocd
+ExecStop=stop-openocd
+Name=Start OpenOCD
+Description=Run the OpenOCD debugger in the background.
+Timeout=2000

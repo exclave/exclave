@@ -1,0 +1,6 @@
+[Jig]
+Name=Linux Jig
+Description=Development Jig running on Linux
+TestFile=/etc
+DefaultScenario=linux-tests
+DefaultWorkingDirectory=lintests
