@@ -65,7 +65,7 @@ impl TerminalInterface {
             while let Ok(event) = receiver.recv() {
                 ti.update_unit(event);
             }
-            eprintln!("Received error from receiver");
+            eprintln!("Receiver has closed -- shutting down");
         });
     }
 
