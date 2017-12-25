@@ -245,7 +245,7 @@ impl UnitCategoryEvent {
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Debug, Clone, Serialize)]
 pub enum LogType {
     Error,
     Info,
@@ -260,7 +260,7 @@ impl LogType {
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Debug, Clone, Serialize)]
 pub struct LogEntry {
     unit: UnitName,
     log_type: LogType,
