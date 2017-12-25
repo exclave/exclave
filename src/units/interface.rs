@@ -411,17 +411,17 @@ impl Interface {
                         }
                     }
                 }
+                "shutdown" => {
+                    if words.is_empty() {
+                        ManagerControlMessageContents::Shutdown(None)
+                    } else {
+                        ManagerControlMessageContents::Shutdown(Some(words.join(" ")))
+                    }
+                }
                 /*
                 "abort" => ControlMessageContents::AbortTests,
                 "pong" => ControlMessageContents::Pong(words[0].to_lowercase()),
                 "hello" => ControlMessageContents::Hello(words.join(" ")),
-                "shutdown" => {
-                    if words.is_empty() {
-                        ControlMessageContents::Shutdown(None)
-                    } else {
-                        ControlMessageContents::Shutdown(Some(words.join(" ")))
-                    }
-                }
                 */
                 v => ManagerControlMessageContents::Unimplemented(v.to_owned(), words.join(" ")),
             };
