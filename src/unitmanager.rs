@@ -163,6 +163,9 @@ pub enum ManagerControlMessageContents {
 
     /// Indicates that a test has finished
     TestFinished(i32 /* Finish code */, String /* The last printed line */),
+
+    /// Shutdown the entire system
+    Shutdown(Option<String>),
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
@@ -932,6 +935,14 @@ impl UnitManager {
             }
             ManagerControlMessageContents::StopTest(ref test_name) => {
                 self.deactivate(test_name, "controller requested test stop");
+            }
+            ManagerControlMessageContents::Shutdown(ref reason) => {
+                let txt = match reason {
+                    &None => format!("shutdown requested (no reason given)"),
+                    &Some(ref s) => format!("shutdown requested: {}", s),
+                };
+                self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(sender_name.clone(), txt)));
+                self.bc.broadcast(&UnitEvent::Shutdown);
             }
         }
     }
