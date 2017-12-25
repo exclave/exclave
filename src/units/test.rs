@@ -255,6 +255,8 @@ impl TestDescription {
 pub struct Test {
     description: TestDescription,
     program: Rc<RefCell<Option<RunningWaiter>>>,
+    result_arc: Arc<Mutex<Option<i32>>>,
+    last_line: Arc<Mutex<String>>,
 }
 
 impl Test {
@@ -262,6 +264,8 @@ impl Test {
         Test {
             description: desc.clone(),
             program: Rc::new(RefCell::new(None)),
+            result_arc: Arc::new(Mutex::new(None)),
+            last_line: Arc::new(Mutex::new("".to_owned())),
          }
     }
 
@@ -288,6 +292,22 @@ impl Test {
         Ok(())
     }
 
+    /// Send the "test finished" message and update the local result value.
+    /// This ensures that we only send the "Finished" result once.
+    pub fn send_finished_once(id: &UnitName,
+                              ctrl: &Sender<ManagerControlMessage>,
+                              result_val: i32,
+                              result_arc: &Arc<Mutex<Option<i32>>>,
+                              last_line: &Arc<Mutex<String>>) {
+
+        let mut result = result_arc.lock().unwrap();
+
+        if result.is_none() {
+            ctrl.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(result_val, last_line.lock().unwrap().clone()))).ok();
+            *result = Some(result_val);
+        }
+    }
+
     pub fn activate(
         &mut self,
         manager: &UnitManager,
@@ -297,6 +317,8 @@ impl Test {
         // We'll communicate to the manager through this pipe.
         let ctrl = manager.get_control_channel();
         let id = self.id().clone();
+
+        *self.result_arc.lock().unwrap() = None;
 
         // Announce to the world that we've started considering this test.
         ctrl.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestStarted)).ok();
@@ -320,15 +342,16 @@ impl Test {
         };
 
         // Keep track of the last line, which we can use to report test status.
-        let last_line = Arc::new(Mutex::new("".to_owned()));
+        let last_line = self.last_line.clone();
 
         let waiter = running.waiter();
         let thr_control = ctrl.clone();
-        let thr_last_line = last_line.clone();
+        let thr_last_line = self.last_line.clone();
+        let thr_result_arc = self.result_arc.clone();
         match self.description.test_type {
             TestType::Daemon => {
                 let daemon_ready_string = self.description.test_daemon_ready.clone();
-                
+
                 thread::spawn(move || {
                     Self::log_error(&id, &ctrl, running.take_error(), &last_line);
                     let mut buf_reader = BufReader::new(running.take_output());
@@ -377,7 +400,7 @@ impl Test {
                     // Advance to the next test while this one hangs out.
                     thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(0))).ok();
                     running.wait().ok();
-                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(running.result(), thr_last_line.lock().unwrap().clone()))).ok();
+                    Self::send_finished_once(&id, &thr_control, running.result(), &thr_result_arc, &thr_last_line);
                 });
             },
             TestType::Simple => {
@@ -387,7 +410,7 @@ impl Test {
                 Self::log_error(&id, &ctrl, running.take_error(), &last_line);
                 thread::spawn(move || {
                     running.wait().ok();
-                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(running.result(), thr_last_line.lock().unwrap().clone()))).ok();
+                    Self::send_finished_once(&id, &thr_control, running.result(), &thr_result_arc, &thr_last_line);
                     thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(running.result()))).ok();
                 });
             }
@@ -397,8 +420,13 @@ impl Test {
         Ok(())
     }
 
-    pub fn deactivate(&self) -> Result<(), UnitDeactivateError> {
+    pub fn deactivate(&self, manager: &UnitManager) -> Result<(), UnitDeactivateError> {
         if let Some(ref running) = *self.program.borrow_mut() {
+            // For Daemons, if they haven't failed so far, then they might fail when we tell them
+            // to quit.  Since they've fulfilled their purpose, issue a "pass" message.
+            if self.description.test_type == TestType::Daemon {
+                Self::send_finished_once(&self.description.id, &manager.get_control_channel(), 0, &self.result_arc, &self.last_line);
+            }
             running.terminate(&None);
         }
         Ok(())

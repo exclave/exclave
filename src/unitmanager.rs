@@ -682,7 +682,7 @@ impl UnitManager {
         let tests = self.tests.borrow();
         match tests.get(id) {
             None => return Err(UnitDeactivateError::UnitNotFound),
-            Some(test) => test.borrow_mut().deactivate(),
+            Some(test) => test.borrow_mut().deactivate(self),
         }
     }
 
