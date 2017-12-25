@@ -387,6 +387,11 @@ impl UnitBroadcaster {
         if let Some(idx) = to_remove {
             notify_senders_ref.remove(idx);
         }
+
+        match *event {
+            UnitEvent::Shutdown => notify_senders_ref.clear(),
+            _ => (),
+        }
     }
 
     pub fn broadcast(&self, event: &UnitEvent) {
