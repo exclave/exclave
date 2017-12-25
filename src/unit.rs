@@ -14,7 +14,7 @@ use self::runny::RunnyError;
 use self::runny::running::RunningError;
 use self::systemd_parser::errors::ParserError;
 
-#[derive(PartialEq, Eq, Hash, Debug, Clone, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, Hash, Debug, Clone, PartialOrd, Ord, Serialize)]
 pub enum UnitKind {
     Interface,
     Jig,
@@ -41,7 +41,7 @@ impl fmt::Display for UnitKind {
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Debug, Clone, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, Hash, Debug, Clone, PartialOrd, Ord, Serialize)]
 pub struct UnitName {
     id: String,
     kind: UnitKind,
