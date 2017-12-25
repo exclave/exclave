@@ -375,7 +375,7 @@ impl Test {
                     });
 
                     // Advance to the next test while this one hangs out.
-                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(running.result()))).ok();
+                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(0))).ok();
                     running.wait().ok();
                     thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(running.result(), thr_last_line.lock().unwrap().clone()))).ok();
                 });
