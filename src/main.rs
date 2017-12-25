@@ -1,6 +1,11 @@
 extern crate clap;
 extern crate ctrlc;
 
+#[macro_use]
+extern crate serde_derive;
+extern crate serde;
+extern crate serde_json;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
