@@ -1,4 +1,5 @@
 extern crate runny;
+extern crate serde_json;
 extern crate systemd_parser;
 
 use std::cell::RefCell;
@@ -12,6 +13,7 @@ use std::thread;
 use config::Config;
 use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitDeselectError,
            UnitIncompatibleReason, UnitName, UnitSelectError};
+use unitbroadcaster::LogEntry;
 use unitmanager::{ManagerControlMessage, ManagerControlMessageContents, ManagerStatusMessage,
                   UnitManager};
 
@@ -260,14 +262,36 @@ impl Logger {
 
     /// Cause a MessageControlContents to be written out.
     pub fn output_message(&self, msg: ManagerStatusMessage) -> Result<(), Error> {
-        match self.description.format {
-            LoggerFormat::TSV => self.tsv_write(msg),
-            LoggerFormat::JSON => self.json_write(msg),
+        let mut process_opt = self.process.borrow_mut();
+
+        if process_opt.is_none() {
+            return Err(Error::new(ErrorKind::Other, "no process running"));
+        }
+
+        let process = process_opt.as_mut().unwrap();
+
+        match msg {
+            ManagerStatusMessage::Log(l) =>
+                match self.description.format {
+                    LoggerFormat::TSV => self.tsv_write(l, process),
+                    LoggerFormat::JSON => self.json_write(l, process),
+                },
+            _ => Ok(()),
         }
     }
 
-    fn json_write(&self, _: ManagerStatusMessage) -> Result<(), Error> {
-        unimplemented!();
+    fn json_write(&self, entry: LogEntry, process: &mut Running) -> Result<(), Error> {
+        /*
+        let mut object = json::JsonValue::new_object();
+        object["message_class"] = msg.message_class.into();
+        object["unit_id"] = msg.unit_id.into();
+        object["unit_type"] = msg.unit_type.into();
+        object["unix_time"] = msg.unix_time.into();
+        object["unix_time_nsecs"] = msg.unix_time_nsecs.into();
+        object["message"] = log.into();
+        writeln!(&mut stdin, "{}", json::stringify(object))
+        */
+        writeln!(process, "{}", serde_json::to_string(&entry)?)
     }
 
     fn cfti_escape(msg: &String) -> String {
@@ -278,27 +302,16 @@ impl Logger {
     }
 
     /// Write a ManagerStatusMessage to a TSV-formatted output.
-    fn tsv_write(&self, msg: ManagerStatusMessage) -> Result<(), Error> {
-        let mut process_opt = self.process.borrow_mut();
-
-        if process_opt.is_none() {
-            return Err(Error::new(ErrorKind::Other, "no process running"));
-        }
-
-        let process = process_opt.as_mut().unwrap();
-
-        match msg {
-            ManagerStatusMessage::Log(l) => writeln!(
-                process,
-                "{}\t{}\t{}\t{}\t{}\t{}",
-                l.kind().as_str(),
-                Self::cfti_escape(l.id().id()),
-                Self::cfti_escape(&format!("{}", l.id().kind())),
-                l.secs(),
-                l.nsecs(),
-                Self::cfti_escape(l.message())
-            ),
-            _ => Ok(()),
-        }
+    fn tsv_write(&self, l: LogEntry, process: &mut Running) -> Result<(), Error> {
+        writeln!(
+            process,
+            "{}\t{}\t{}\t{}\t{}\t{}",
+            l.kind().as_str(),
+            Self::cfti_escape(l.id().id()),
+            Self::cfti_escape(&format!("{}", l.id().kind())),
+            l.secs(),
+            l.nsecs(),
+            Self::cfti_escape(l.message())
+        )
     }
 }
