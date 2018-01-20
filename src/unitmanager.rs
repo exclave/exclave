@@ -90,8 +90,11 @@ pub enum ManagerStatusMessage {
     /// A log message from one of the units, or the system itself.
     Log(LogEntry),
 
-    /// A test has started running,
+    /// A test has started running.
     Running(UnitName),
+
+    /// A scenario has started
+    Start(UnitName),
 
     /// Indicates that a test passed successfully.
     Pass(UnitName, String /* log message */),
@@ -908,6 +911,7 @@ impl UnitManager {
                 };
 
                 self.activate(&scenario_name);
+                self.broadcast_message(ManagerStatusMessage::Start(scenario_name));
             },
             ManagerControlMessageContents::Skip(ref test_name, ref reason) => {
                 self.broadcast_skipped(test_name, reason);
