@@ -329,6 +329,9 @@ impl Interface {
             }
             ManagerStatusMessage::Pass(test, reason) => {
                 writeln!(process, "PASS {} {}", Self::cfti_escape(test.id()), Self::cfti_escape(&reason))
+            }
+            ManagerStatusMessage::Start(scenario) => {
+                writeln!(process, "START {}", Self::cfti_escape(scenario.id()))
             }             /*
             //            BroadcastMessageContents::Hello(name) => writeln!(stdin,
             //                                                "HELLO {}", name),
