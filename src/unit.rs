@@ -143,6 +143,7 @@ impl fmt::Display for UnitName {
     }
 }
 
+#[derive(Debug)]
 pub enum UnitIncompatibleReason {
     TestProgramReturnedNonzero(i32, String),
     TestProgramFailed(String),
