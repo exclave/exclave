@@ -307,6 +307,7 @@ impl fmt::Display for UnitDeactivateError {
     }
 }
 
+#[derive(Debug)]
 pub enum UnitDescriptionError {
     InvalidUnitName(UnitNameError),
     MissingSection(String /* section name */),
