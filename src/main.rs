@@ -140,3 +140,6 @@ fn main() {
         quiesce.process_message(&msg);
     }
 }
+
+#[cfg(test)]
+mod test;
