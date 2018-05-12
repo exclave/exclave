@@ -8,7 +8,8 @@ license = "BSD-3-Clause"
 [dependencies]
 notify = "4.0"
 clap = "2.26"
-console = "0.5"
+#console = "0.6.1"
+# cursive = { version = "0.8.1", features = ["blt-backend"], default-features = false }
 ctrlc = { version = "3.0", features = ["termination"] }
 dependy = "0.4.0"
 humantime = "1.0.0"
@@ -18,3 +19,21 @@ serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
 systemd-parser = "0.1"
+isatty = "0.1"
+
+#[target.'cfg(windows)'.dependencies.cursive]
+#path = "../cursive"
+#default-features = false
+#features = ["pancurses-backend"]
+#
+#[target.'cfg(windows)'.dev-dependencies.cursive]
+#path = "../cursive"
+#default-features = false
+#features = ["pancurses-backend"]
+#
+#[target.'cfg not(windows)'.dependencies]
+#cursive = { path = "../cursive" }
+[dependencies.cursive]
+path = "../cursive"
+default-features = false
+features = ["pancurses-backend"]

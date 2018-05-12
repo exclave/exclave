@@ -1,16 +1,27 @@
-extern crate console;
+extern crate cursive;
+extern crate isatty;
 
-use self::console::Term;
+use self::cursive::{CbFunc, Cursive};
+use self::cursive::views::{Dialog, EditView, OnEventView, TextArea};
+use self::cursive::traits::*;
+
 use unit::{UnitKind, UnitName};
 use unitbroadcaster::{LogEntry, UnitCategoryStatus, UnitEvent, UnitStatus};
 use std::collections::{BTreeMap, HashMap};
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
+use std::io::{stdout, Stdout};
 
 #[derive(PartialEq)]
 pub enum TerminalOutputType {
     Fancy,
     Plain,
+    None,
+}
+
+pub enum TerminalOutput {
+    Fancy(Cursive),
+    Plain(Stdout),
     None,
 }
 
@@ -28,10 +39,7 @@ pub struct TerminalInterface {
     logs: Vec<LogEntry>,
 
     /// The current stdout of the terminal.
-    terminal: Term,
-
-    /// The currently-selected Terminal output (i.e. "Fancy", "Plain", "None", ...).
-    output_type: TerminalOutputType,
+    terminal: TerminalOutput,
 
     /// A list of how many lines was printed during the last fancy print.
     /// Eventually, printers should be moved to their own Trait, and this
@@ -44,19 +52,81 @@ pub struct TerminalInterface {
 
 impl TerminalInterface {
     pub fn start(output_type: Option<TerminalOutputType>, receiver: Receiver<UnitEvent>) {
-        let stdout = Term::stdout();
         let output_type = match output_type {
             Some(s) => s,
-            None if stdout.is_term() => TerminalOutputType::Fancy,
+            None if isatty::stderr_isatty() => TerminalOutputType::Fancy,
             None => TerminalOutputType::Plain,
         };
 
-        thread::spawn(move || {
+        thread::spawn(move || Self::do_terminal(output_type, receiver));
+    }
+
+    fn do_terminal(output_type: TerminalOutputType, receiver: Receiver<UnitEvent>) {
+        match output_type {
+            TerminalOutputType::None => return,
+            TerminalOutputType::Plain => {
+                thread::spawn(move || {
+                    while let Ok(event) = receiver.recv() {
+                        match event {
+                            UnitEvent::Status(stat) => println!("    {} -> {}", stat.name(), stat.status()),
+                            UnitEvent::Category(stat) => println!("{}: {}", stat.kind(), stat.status()),
+                            UnitEvent::RescanRequest => println!("Unit rescan requested"),
+                            UnitEvent::RescanStart => println!("Started unit recsan..."),
+                            UnitEvent::RescanFinish => println!("Finished rescanning units"),
+                            UnitEvent::Shutdown => println!("Shutting down"),
+                            UnitEvent::Log(log) => println!("{}", log),
+                            UnitEvent::ManagerRequest(_) => (),
+                        };
+                    }
+                });
+            },
+            TerminalOutputType::Fancy => {
+                let mut siv = Cursive::default();
+
+                // The main dialog will just have a textarea.
+                // Its size expand automatically with the content.
+                siv.add_layer(
+//                    Dialog::new()
+//                        .title("Describe your issue")
+//                        .padding((1, 1, 1, 0))
+                        //.content(
+                            TextArea::new().with_id("text")
+                        //.button("Ok", Cursive::quit),
+                );
+
+                let cb = siv.cb_sink().clone();
+                thread::spawn(move || {
+                    while let Ok(event) = receiver.recv() {
+                        cb.send(Box::new(Self::update_cursive)).unwrap();
+                    }
+                });
+                siv.set_fps(30);
+                siv.run();
+            },
+        };
+    }
+
+    fn update_cursive(s: &mut Cursive) {
+        /*
+        s.pop_layer();
+        s.add_layer(
+            Dialog::new()
+                .title("Preparation complete")
+                .content(TextView::new("Now, the real deal!").center())
+        );
+        */
+    }
+    /*
             let mut ti = TerminalInterface {
-                output_type: output_type,
                 unit_status: HashMap::new(),
                 category_status: BTreeMap::new(),
-                terminal: stdout,
+                terminal: match output_type {
+                    TerminalOutputType::Fancy => {
+                        TerminalOutput::Fancy(cb);
+
+                    }
+                    TerminalOutputType::Plain => TerminalOutput::Plain(stdout()),
+                },
                 last_line_count: 0,
                 logs: vec![],
                 log_history: MAX_LOG_HISTORY,
@@ -106,10 +176,10 @@ impl TerminalInterface {
             UnitEvent::ManagerRequest(_) => (),
         }
 
-        match self.output_type {
-            TerminalOutputType::Plain => self.draw_event(event),
-            TerminalOutputType::Fancy => self.redraw_screen(event),
-            TerminalOutputType::None => (),
+        match self.terminal {
+            TerminalOutput::Plain(_) => self.draw_event(event),
+            TerminalOutput::Fancy(_) => self.redraw_screen(event),
+            TerminalOutput::None => (),
         };
     }
 
@@ -124,13 +194,13 @@ impl TerminalInterface {
             UnitEvent::Log(log) => println!("{}", log),
             UnitEvent::ManagerRequest(_) => (),
         };
-    }
+    }*/
 
     fn redraw_screen(&mut self, evt: UnitEvent) {
         if evt != UnitEvent::RescanFinish {
             return;
         }
-
+/*
         // Clear out the previous entries, plus the headers for the field types.
         self.terminal
             .clear_last_lines(self.last_line_count)
@@ -170,13 +240,18 @@ impl TerminalInterface {
 
         if self.logs.len() > 0 {
             line_count = line_count + 1;
-            self.terminal.write_line(format!("Logs: ").as_str()).expect("Unable to write log");
+            self.terminal
+                .write_line(format!("Logs: ").as_str())
+                .expect("Unable to write log");
         }
         for log_line in self.logs.iter() {
             line_count = line_count + 1;
-            self.terminal.write_line(format!("  {}", log_line).as_str()).expect("Unable to write log");
+            self.terminal
+                .write_line(format!("  {}", log_line).as_str())
+                .expect("Unable to write log");
         }
         self.terminal.flush().expect("Couldn't redraw screen");
         self.last_line_count = line_count;
+        */
     }
 }
