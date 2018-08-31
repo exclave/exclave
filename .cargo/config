@@ -1,0 +1,17 @@
+#[build]
+#target = "armv7-unknown-linux-gnueabihf"
+
+[target.aarch64-unknown-linux-musl]
+linker = "aarch64-linux-gnu-gcc"
+# Hack required for now -- see https://github.com/rust-lang/rust/issues/46651#issuecomment-402850885
+rustflags = [
+ "-C", "link-arg=-lgcc"
+]
+
+# rustup target install armv7-unknown-linux-gnueabihf
+# cargo build --release --target=armv7-unknown-linux-gnueabihf
+[target.armv7-unknown-linux-gnueabihf]
+linker = "arm-linux-gnueabihf-gcc"
+
+[target.armv7-unknown-linux-musleabihf]
+linker = "arm-linux-gnueabihf-gcc"
