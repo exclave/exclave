@@ -897,6 +897,13 @@ impl UnitManager {
                 self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unimplemented verb: {} (args: {})", verb, remainder))));
             },
             ManagerControlMessageContents::StartScenario(ref scenario_name_opt) => {
+                // If a scenario exists and is running, don't start a new one.
+                if let Some(ref scenario) = *self.current_scenario.borrow() {
+                    if scenario.borrow().is_running() {
+                        self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), "unable to start scenario: scenario not idle".to_owned())));
+                        return;
+                    }
+                }
                 let scenario_name = if let Some(ref scenario_name) = *scenario_name_opt {
                     self.select(scenario_name);
                     scenario_name.clone()
