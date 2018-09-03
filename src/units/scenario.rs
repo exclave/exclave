@@ -792,4 +792,10 @@ impl Scenario {
                                                 ManagerControlMessageContents::ScenarioFinished(200, "all tests passed".to_owned()))).ok();
         }
     }
+
+    // Determine if Scenario is running or idle
+    pub fn is_running(&self) -> bool {
+        let s = self.state.borrow();
+        *s != ScenarioState::Idle && *s != ScenarioState::TestFinished
+    }
 }
