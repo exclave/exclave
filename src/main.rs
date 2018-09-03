@@ -8,6 +8,7 @@ extern crate serde_json;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use std::env;
 
 mod unit;
 mod unitbroadcaster;
@@ -88,6 +89,14 @@ fn main() {
     } else {
         None
     };
+
+    // Set the current working directory to the first-specified path.
+    // That way, relative paths will continue to work.
+    if let Some(path) = config_dirs.get(0) {
+        if let Err(e) = env::set_current_dir(path) {
+            println!("Unable to change to config dir: {}", e);
+        }
+    }
 
     terminal::TerminalInterface::start(output_type, unit_broadcaster.subscribe());
 
