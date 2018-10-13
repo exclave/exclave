@@ -18,3 +18,5 @@ Setting up a Jig
 1. Install libpng-dev, required for QR code support: `dnf install libpng-devel`
 1. Install other support libraries: `dnf install libtool which vim emacs gdb net-tools screen nmap-ncat`
 1. Clone openocd: `mkdir /opt/openocd; mkdir code; cd code; git clone --recursive git://git.code.sf.net/p/openocd/code openocd; cd openocd; ./bootstrap; ./configure --enable-bcm2835gpio --enable-sysfsgpio --disable-werror --prefix=/opt/openocd; make; make install`
+
+A pre-built base image executed according to the above instructions can be downloaded at: https://bunniefoo.com/exclave/exclave-initial-image-oct-13-2018.img.gz. It starts with the fedberry-minimal image version 28 (20180725) and contains all the updates available as of October 13 2018. The version of openocd built and installed is based on the migen fork, which includes FPGA and SPI over JTAG programming.
