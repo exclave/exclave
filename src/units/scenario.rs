@@ -274,7 +274,7 @@ impl ScenarioDescription {
                   config: &Config)
                   -> Result<Scenario, UnitIncompatibleReason> {
         let (test_order, graph) = self.is_compatible(manager, config)?;
-        Ok(Scenario::new(self, test_order, manager, graph, config))
+        Ok(Scenario::new(self, test_order, manager, graph))
     }
 
     pub fn get_test_order(&self,
@@ -396,8 +396,7 @@ impl Scenario {
     fn new(desc: &ScenarioDescription,
                test_order: Vec<UnitName>,
                manager: &UnitManager,
-               graph: Dependy<UnitName>,
-               config: &Config)
+               graph: Dependy<UnitName>)
                -> Scenario {
 
         let mut tests = HashMap::new();
