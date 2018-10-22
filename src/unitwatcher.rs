@@ -81,8 +81,6 @@ impl UnitWatcher {
 
         // Add a path to be watched. All files and directories at that path and
         // below will be monitored for changes.
-        try!(self.watcher.watch(path, RecursiveMode::Recursive));
-
-        Ok(())
+        self.watcher.watch(path, RecursiveMode::Recursive)
     }
 }
