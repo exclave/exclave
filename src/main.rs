@@ -103,7 +103,7 @@ fn main() {
     for config_dir in config_dirs {
         unit_watcher
             .add_path(config_dir)
-            .expect("Unable to add config directory");
+            .expect(&format!("Unable to add config directory {}", config_dir));
     }
 
     let mut quiesce = quiesce::Quiesce::new(Duration::from_secs(1), &unit_broadcaster);
