@@ -736,7 +736,7 @@ impl Scenario {
                 return true;
             }
 
-            let result = &*self.test_states.get(test_name).unwrap().borrow();
+            let result = &*self.test_states.get(parent_name).unwrap().borrow();
 
             // If the dependent test did not succeed, then at least
             // one dependency failed.
