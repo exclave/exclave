@@ -375,33 +375,37 @@ impl Test {
 
                 thread::spawn(move || {
                     Self::log_error(&id, &ctrl, running.take_error(), &last_line);
-                    let mut buf_reader = BufReader::new(running.take_output());
+                    let buf_reader = BufReader::new(running.take_output());
+                    let buf_lines = buf_reader.lines();
+                    let mut buf_iter = buf_lines.into_iter();
                     if let Some(ref r) = daemon_ready_string {
-                        loop {
-                            let mut line = String::new();
-                            match buf_reader.read_line(&mut line) {
+                        let mut found = false;
+                        while let Some(line_result) = buf_iter.next() {
+                            match line_result {
                                 Err(e) => {
-                                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(format!("test daemon raised error: {}", e.description())))).unwrap();
+                                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(format!("test daemon raised an error: {}", e.description())))).unwrap();
                                     thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(-2))).ok();
                                     running.terminate(Some(Duration::from_secs(1))).ok();
-                                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(-2, thr_last_line.lock().unwrap().clone()))).ok();
+                                    // thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(-2, thr_last_line.lock().unwrap().clone()))).ok();
+                                    Self::send_finished_once(&id, &thr_control, -2, &thr_result_arc, &thr_last_line);
                                     return;
                                 }
-                                Ok(0) => {
-                                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(format!("test daemon exited early")))).unwrap();
-                                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(-1))).ok();
-                                    running.terminate(Some(Duration::from_secs(1))).ok();
-                                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(-1, thr_last_line.lock().unwrap().clone()))).ok();
-                                    return;
-                                }
-                                Ok(_) => {
+                                Ok(line) => {
                                     thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::Log(line.clone()))).unwrap();
-                                    if r.is_match(line.as_str()) {
+                                    if r.is_match(&line) {
+                                        found = true;
                                         break;
                                     }
                                 }
                             }
-                            line.clear();
+                        }
+                        if !found {
+                            thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(format!("test daemon exited before ready string was found")))).unwrap();
+                            thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(-1))).ok();
+                            running.terminate(Some(Duration::from_secs(1))).ok();
+                            Self::send_finished_once(&id, &thr_control, -1, &thr_result_arc, &thr_last_line);
+//                            thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(-1, thr_last_line.lock().unwrap().clone()))).ok();
+                            return;
                         }
                     }
                     // Log the output normally, now that the daemon has started up.
@@ -409,7 +413,7 @@ impl Test {
                     let thr_thr_last_line = last_line.clone();
                     let thr_id = id.clone();
                     thread::spawn(move || {
-                        for line in buf_reader.lines() {
+                        for line in buf_iter {
                             let line = line.expect("Unable to get next line");
                             *thr_thr_last_line.lock().unwrap() = line.clone();
                             if let Err(_) = thr_thr_control.send(ManagerControlMessage::new(&thr_id, ManagerControlMessageContents::Log(line))) {
