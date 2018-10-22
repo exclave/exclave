@@ -51,6 +51,9 @@ pub struct LoggerDescription {
     /// The working directory to start from when running the logger
     working_directory: Option<PathBuf>,
 
+    /// The path to the unit file
+    unit_directory: PathBuf,
+
     /// How long to wait for a terminate() call
     terminate_timeout: Duration,
 }
@@ -76,6 +79,7 @@ impl LoggerDescription {
             format: LoggerFormat::TSV,
             exec_start: "".to_owned(),
             working_directory: None,
+            unit_directory: path.parent().unwrap().to_owned(),
             terminate_timeout: Duration::from_secs(5),
         };
 
@@ -93,8 +97,9 @@ impl LoggerDescription {
                         }
                     }
                     "WorkingDirectory" => {
-                        logger_description.working_directory =
-                            Some(Path::new(directive.value().unwrap_or("")).to_owned())
+                        if let Some(wd) = directive.value() {
+                            logger_description.working_directory = Some(PathBuf::from(wd));
+                        }
                     }
                     "ExecStart" => {
                         logger_description.exec_start = match directive.value() {
@@ -214,7 +219,7 @@ impl Logger {
     ) -> Result<(), UnitActivateError> {
         let mut running = Runny::new(self.description.exec_start.as_str())
             .directory(&Some(
-                config.working_directory(&self.description.working_directory),
+                config.working_directory(&self.description.unit_directory, &self.description.working_directory),
             ))
             .start()?;
 
