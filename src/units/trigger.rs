@@ -46,6 +46,9 @@ pub struct TriggerDescription {
 
     /// The working directory to start from when running the Trigger
     working_directory: Option<PathBuf>,
+
+    /// The path to the unit file
+    unit_directory: PathBuf,
 }
 
 impl TriggerDescription {
@@ -69,6 +72,7 @@ impl TriggerDescription {
             format: TriggerFormat::Text,
             exec_start: "".to_owned(),
             working_directory: None,
+            unit_directory: path.parent().unwrap().to_owned(),
         };
 
         for entry in unit_file.lookup_by_category("Trigger") {
@@ -88,8 +92,9 @@ impl TriggerDescription {
                         }
                     }
                     "WorkingDirectory" => {
-                        interface_description.working_directory =
-                            Some(Path::new(directive.value().unwrap_or("")).to_owned())
+                        if let Some(wd) = directive.value() {
+                            interface_description.working_directory = Some(PathBuf::from(wd));
+                        }
                     }
                     "ExecStart" => {
                         interface_description.exec_start = match directive.value() {
@@ -195,7 +200,7 @@ impl Trigger {
         config: &Config,
     ) -> Result<(), UnitActivateError> {
         let mut running = Runny::new(self.description.exec_start.as_str())
-                    .directory(&Some(config.working_directory(&self.description.working_directory)))
+                    .directory(&Some(config.working_directory(&self.description.unit_directory, &self.description.working_directory)))
                     .start()?;
 
         let stdout = running.take_output();
