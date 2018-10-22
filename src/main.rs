@@ -8,7 +8,6 @@ extern crate serde_json;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use std::env;
 
 mod unit;
 mod unitbroadcaster;
