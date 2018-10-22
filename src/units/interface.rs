@@ -167,10 +167,7 @@ impl InterfaceDescription {
 }
 
 pub struct Interface {
-    id: UnitName,
-    exec_start: String,
-    working_directory: Option<PathBuf>,
-    format: InterfaceFormat,
+    desc: InterfaceDescription,
     process: RefCell<Option<Running>>,
     terminate_timeout: Duration,
 }
@@ -178,17 +175,14 @@ pub struct Interface {
 impl Interface {
     pub fn new(desc: &InterfaceDescription, _: &UnitManager, config: &Config) -> Interface {
         Interface {
-            id: desc.id.clone(),
-            exec_start: desc.exec_start.clone(),
-            working_directory: desc.working_directory.clone(),
-            format: desc.format,
+            desc: desc.clone(),
             process: RefCell::new(None),
             terminate_timeout: config.terminate_timeout().clone(),
         }
     }
 
     pub fn id(&self) -> &UnitName {
-        &self.id
+        &self.desc.id
     }
 
     pub fn select(&self) -> Result<(), UnitSelectError> {
@@ -204,16 +198,16 @@ impl Interface {
         manager: &UnitManager,
         config: &Config,
     ) -> Result<(), UnitActivateError> {
-        let mut running = Runny::new(self.exec_start.as_str())
-                    .directory(&Some(config.working_directory(&self.working_directory)))
-                    .start()?;
+        let mut running = Runny::new(&self.desc.exec_start)
+            .directory(&Some(config.working_directory(&self.desc.unit_directory, &self.desc.working_directory)))
+            .start()?;
 
         let stdout = running.take_output();
         let stderr = running.take_error();
 
         let control_sender = manager.get_control_channel();
         let control_sender_id = self.id().clone();
-        match self.format {
+        match self.desc.format {
             InterfaceFormat::Text => {
                 // Pass control to an out-of-object thread, and shuttle communications
                 // from stdout onto the control_sender channel.
@@ -246,15 +240,14 @@ impl Interface {
                 },
                 Err(e) => Err(UnitDeactivateError::RunningError(e)),
             }
-        }
-        else {
+        } else {
             Ok(())
         }
     }
 
     /// Cause a MessageControlContents to be written out.
     pub fn output_message(&self, msg: ManagerStatusMessage) -> Result<(), Error> {
-        match self.format {
+        match self.desc.format {
             InterfaceFormat::Text => self.text_write(msg),
             InterfaceFormat::JSON => self.json_write(msg),
         }
