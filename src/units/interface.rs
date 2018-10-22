@@ -26,6 +26,7 @@ enum InterfaceFormat {
 }
 
 /// A struct defining an in-memory representation of a .Interface file
+#[derive(Clone)]
 pub struct InterfaceDescription {
     /// The id of the unit (including the kind)
     id: UnitName,
