@@ -86,6 +86,9 @@ pub struct ScenarioDescription {
     /// A default working directory to start from.  Overrides Jig and global config paths.
     working_directory: Option<PathBuf>,
 
+    /// The path where the .scenario file is
+    unit_directory: PathBuf,
+
     /// A preflight command to run before the scenario starts.  A failure here will prevent the test from running.
     exec_start: Option<String>,
 
@@ -129,6 +132,7 @@ impl ScenarioDescription {
 
             timeout: None,
 
+            unit_directory: path.parent().unwrap().to_owned(),
             working_directory: None,
 
             exec_start: None,
@@ -157,9 +161,8 @@ impl ScenarioDescription {
                             }
                         }
                         "WorkingDirectory" => {
-                            scenario_description.working_directory = match directive.value() {
-                                None => None,
-                                Some(ps) => Some(PathBuf::from(ps)),
+                            if let Some(wd) = directive.value() {
+                                Some(PathBuf::from(wd));
                             }
                         }
                         "Tests" => {
@@ -377,7 +380,7 @@ pub struct Scenario {
 
     /// The current working directory, based on the description, jig, and config.
     /// Used for PreStart and PostFinish scripts.
-    working_directory: Rc<RefCell<PathBuf>>,
+    support_wd: Rc<RefCell<PathBuf>>,
 
     /// The dependency graph of tests.
     graph: Dependy<UnitName>,
@@ -415,7 +418,7 @@ impl Scenario {
             test_states: test_state,
             exec_start_state: Rc::new(RefCell::new(TestState::Pending)),
             state: Rc::new(RefCell::new(ScenarioState::Idle)),
-            working_directory: Rc::new(RefCell::new(config.working_directory(&None))),
+            support_wd: Rc::new(RefCell::new(desc.unit_directory.clone())),
             failures: Rc::new(RefCell::new(0)),
             graph: graph,
             start_time: Instant::now(),
@@ -466,8 +469,16 @@ impl Scenario {
         }
 
         // Re-assign our working directory.
-        config.set_scenario_working_directory(&self.description.working_directory);
-        *self.working_directory.borrow_mut() = config.working_directory(&None);
+        if let &Some(ref wd) = &self.description.working_directory {
+            config.set_scenario_working_directory(&wd);
+        }
+        else {
+            config.clear_scenario_working_directory();
+        }
+
+        // Since `config` doesn't get passed around anymore, create a copy of the `working_directory`
+        // so that we can run support commands.
+        *self.support_wd.borrow_mut() = config.working_directory(&self.description.unit_directory, &self.description.working_directory);
 
         // Cause the scenario to move to the next (i.e. first) phase.
         ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::AdvanceScenario(0))).ok();
@@ -573,7 +584,7 @@ impl Scenario {
         if let Some(timeout) = *timeout {
             cmd.timeout(timeout);
         }
-        cmd.directory(&Some(self.working_directory.borrow().clone()));
+        cmd.directory(&Some(self.support_wd.borrow().clone()));
         let mut running = match cmd.start() {
             Ok(o) => o,
             Err(e) => unimplemented!(),
