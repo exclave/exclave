@@ -338,7 +338,7 @@ enum ScenarioState {
     TestFinished,
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum TestState {
     /// A test has yet to be run.
     Pending,
@@ -502,18 +502,22 @@ impl Scenario {
     }
 
     // Given the current state, figure out the next test to run (if any)
-    pub fn advance(&self, last_result: i32, ctrl: &Sender<ManagerControlMessage>) {
+    pub fn advance(&self, last_unit: &UnitName, last_result: i32, ctrl: &Sender<ManagerControlMessage>) {
         let current_state = self.state.borrow().clone();
 
         // Run the test's stop() command if we just ran a test.
         match current_state {
             ScenarioState::Running(step) => {
                 let test_id = self.test_sequence[step].borrow().id().clone();
+                if test_id != *last_unit {
+                    ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::LogError(format!("unit {} is not the expected currently-running unit: {} (step {})", last_unit, test_id, step)))).ok();
+                }
                 let result = match last_result {
                     0 => TestState::Pass,
                     r => {
                         *self.failures.borrow_mut() += 1;
-                        TestState::Fail(format!("test exited with {}", r))
+                        ctrl.send(ManagerControlMessage::new(last_unit, ManagerControlMessageContents::LogError(format!("test failed with nonzero return code: {}", r)))).ok();
+                        TestState::Fail(format!("test exited with nonzero return code: {}", r))
                     },
                 };
                 *self.test_states.get(&test_id).unwrap().borrow_mut() = result;
