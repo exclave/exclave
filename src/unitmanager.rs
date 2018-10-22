@@ -892,7 +892,7 @@ impl UnitManager {
             ManagerControlMessageContents::AdvanceScenario(result) => {
                 match *self.current_scenario.borrow() {
                     None => (),
-                    Some(ref current_scenario) => current_scenario.borrow_mut().advance(result, &self.control_sender),
+                    Some(ref current_scenario) => current_scenario.borrow_mut().advance(sender_name, result, &self.control_sender),
                 }
             },
             ManagerControlMessageContents::Unimplemented(ref verb, ref remainder) => {
