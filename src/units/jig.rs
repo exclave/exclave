@@ -31,6 +31,9 @@ pub struct JigDescription {
     /// The default directory for programs on this jig, if any
     working_directory: Option<PathBuf>,
 
+    /// The path to the unit file,
+    unit_directory: PathBuf,
+
     /// A program to run to determine if this jig is compatible, if any
     test_program: Option<String>,
 
@@ -45,10 +48,10 @@ impl JigDescription {
         // Parse the file into a systemd unit_file object
         let mut contents = String::with_capacity(8192);
         File::open(path)?.read_to_string(&mut contents)?;
-        Self::from_string(&contents, unit_name)
+        Self::from_string(&contents, unit_name, path)
     }
 
-    pub fn from_string(contents: &str, unit_name: UnitName) -> Result<JigDescription, UnitDescriptionError> {
+    pub fn from_string(contents: &str, unit_name: UnitName, path: &Path) -> Result<JigDescription, UnitDescriptionError> {
         let unit_file = systemd_parser::parse_string(&contents)?;
 
         if !unit_file.has_category("Jig") {
@@ -61,6 +64,7 @@ impl JigDescription {
             description: "".to_owned(),
             default_scenario: None,
             working_directory: None,
+            unit_directory: path.parent().unwrap().to_owned(),
             test_program: None,
             test_file: None,
         };
@@ -73,9 +77,8 @@ impl JigDescription {
                         jig_description.description = directive.value().unwrap_or("").to_owned()
                     }
                     "WorkingDirectory" | "DefaultWorkingDirectory" => {
-                        jig_description.working_directory = match directive.value() {
-                            None => None,
-                            Some(ps) => Some(PathBuf::from(ps)),
+                        if let Some(wd) = directive.value() {
+                            jig_description.working_directory = Some(PathBuf::from(wd));
                         }
                     }
                     "TestFile" => {
@@ -125,7 +128,7 @@ impl JigDescription {
             use std::io::{BufRead, BufReader};
 
             let running = Runny::new(cmd_str)
-                .directory(&Some(config.working_directory(&self.working_directory).clone()))
+                .directory(&Some(config.working_directory(&self.unit_directory, &self.working_directory).clone()))
                 .timeout(config.timeout().clone())
                 .path(config.paths().clone())
                 .start()?;
@@ -203,7 +206,11 @@ impl Jig {
         _manager: &UnitManager,
         config: &Config,
     ) -> Result<(), UnitActivateError> {
-        config.set_jig_working_directory(&self.description.working_directory);
+        if let Some(ref wd) = self.description.working_directory {
+            config.set_jig_working_directory(wd);
+        } else {
+            config.clear_jig_working_directory();
+        }
         Ok(())
     }
 
