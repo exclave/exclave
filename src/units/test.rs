@@ -156,6 +156,18 @@ impl TestDescription {
                                 None => vec![],
                             }
                         }
+                        "Requires" => {
+                            test_description.requires = match directive.value() {
+                                Some(s) => UnitName::from_list(s, "test")?,
+                                None => vec![],
+                            }
+                        }
+                        "Suggests" => {
+                            test_description.suggests = match directive.value() {
+                                Some(s) => UnitName::from_list(s, "test")?,
+                                None => vec![],
+                            }
+                        }
                         "DaemonReadyText" => {
                             test_description.test_daemon_ready = match directive.value() {
                                 Some(s) => Some(Regex::new(s)?),
