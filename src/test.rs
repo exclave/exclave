@@ -2,9 +2,10 @@ use std::sync::{Arc, Mutex};
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 use std::thread;
+use std::path::PathBuf;
 
 use config::Config;
-use unit::{UnitKind, UnitName};
+use unit::{UnitKind, UnitName, UnitDescriptionError};
 use unitbroadcaster::{UnitBroadcaster, UnitEvent};
 //use unitwatcher::UnitWatcher;
 //use unitloader::UnitLoader;
@@ -65,14 +66,14 @@ fn setup_exclave(timeout: Option<Duration>) -> Exclave {
     }
 }
 
-fn add_unit(exclave: &Exclave, name: UnitName, unit_text: &str) -> Result<(), ()> {
+fn add_unit(exclave: &Exclave, name: UnitName, unit_text: &str) -> Result<(), UnitDescriptionError> {
     match *name.kind() {
         UnitKind::Test => {
-            let desc = TestDescription::from_string(unit_text, name)?;
+            let desc = TestDescription::from_string(unit_text, name, &PathBuf::from("test/config"))?;
             exclave.manager.load_test(&desc).unwrap();
         },
         UnitKind::Jig => {
-            let desc = JigDescription::from_string(unit_text, name)?;
+            let desc = JigDescription::from_string(unit_text, name, &PathBuf::from("test/config"))?;
             exclave.manager.load_jig(&desc).unwrap();
         },
         _ => (),
@@ -84,6 +85,6 @@ fn add_unit(exclave: &Exclave, name: UnitName, unit_text: &str) -> Result<(), ()
 fn load_dependency() {
     let exclave = setup_exclave(None);
     add_unit(&exclave, UnitName::from_str("generic", "jig").unwrap(), GENERIC_JIG).ok();
-    add_unit(&exclave, UnitName::from_str("linux", "jig").unwrap(), LINUX_JIG).ok();
+    //add_unit(&exclave, UnitName::from_str("linux", "jig").unwrap(), LINUX_JIG).ok();
     assert!(exclave.manager.jig_is_loaded(&UnitName::from_str("generic", "jig").unwrap()));
 }
