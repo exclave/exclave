@@ -89,6 +89,9 @@ pub struct TestDescription {
 
     /// working_directory: Directory to run progrms from, if any.
     working_directory: Option<PathBuf>,
+
+    /// The path to the unit file
+    unit_directory: PathBuf,
 }
 
 impl TestDescription {
@@ -98,10 +101,10 @@ impl TestDescription {
         // Parse the file into a systemd unit_file object
         let mut contents = String::with_capacity(8192);
         File::open(path)?.read_to_string(&mut contents)?;
-        Self::from_string(&contents, unit_name)
+        Self::from_string(&contents, unit_name, path)
     }
 
-    pub fn from_string(contents: &str, unit_name: UnitName) -> Result<TestDescription, UnitDescriptionError> {
+    pub fn from_string(contents: &str, unit_name: UnitName, path: &Path) -> Result<TestDescription, UnitDescriptionError> {
         let unit_file = systemd_parser::parse_string(&contents)?;
 
         if !unit_file.has_category("Test") {
@@ -131,6 +134,7 @@ impl TestDescription {
             exec_stop_failure: None,
             exec_stop_success: None,
             working_directory: None,
+            unit_directory: path.parent().unwrap().to_owned(),
         };
 
         for entry in unit_file.lookup_by_category("Test") {
@@ -192,9 +196,10 @@ impl TestDescription {
                             };
                         }
                         "WorkingDirectory" => {
-                            test_description.working_directory = match directive.value() {
-                                None => None,
-                                Some(ps) => Some(PathBuf::from(ps)),
+                            // If a WorkingDirectory was specified, add it to the current directory
+                            // (replaces `working_directory` if the new WD is absolute)
+                            if let Some(wd) = directive.value() {
+                                test_description.working_directory = Some(PathBuf::from(wd));
                             }
                         }
                         "ExecStart" => {
@@ -346,7 +351,7 @@ impl Test {
         if let Some(timeout) = *timeout {
             cmd.timeout(timeout);
         }
-        cmd.directory(&Some(config.working_directory(&self.description.working_directory)));
+        cmd.directory(&Some(config.working_directory(&self.description.unit_directory, &self.description.working_directory)));
         let mut running = match cmd.start() {
             Ok(r) => r,
             Err(e) => {
