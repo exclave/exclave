@@ -418,4 +418,8 @@ impl UnitLibrary {
         // Also pass the message on to the unit manager.
         self.unit_manager.borrow().process_message(evt);
     }
+
+    pub fn get_manager(&self) -> &RefCell<UnitManager> {
+        &self.unit_manager
+    }
 }
