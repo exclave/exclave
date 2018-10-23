@@ -1,38 +1,29 @@
 use std::path::PathBuf;
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, RecvError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use config::Config;
-use unit::{UnitDescriptionError, UnitKind, UnitName};
+
+use unit::{UnitKind, UnitName};
 use unitbroadcaster::{UnitBroadcaster, UnitEvent};
-//use unitwatcher::UnitWatcher;
-//use unitloader::UnitLoader;
-use unitmanager::UnitManager;
-use units::interface::{Interface, InterfaceDescription};
-use units::jig::{Jig, JigDescription};
-use units::logger::{Logger, LoggerDescription};
-use units::scenario::{Scenario, ScenarioDescription};
-use units::test::{Test, TestDescription};
-use units::trigger::{Trigger, TriggerDescription};
+use unitlibrary::UnitLibrary;
+use unitmanager::{ManagerControlMessage, ManagerControlMessageContents};
+
+use units::interface::InterfaceDescription;
+use units::jig::JigDescription;
+use units::logger::LoggerDescription;
+use units::scenario::ScenarioDescription;
+use units::test::TestDescription;
+use units::trigger::TriggerDescription;
 
 struct Exclave {
-    config: Arc<Mutex<Config>>,
     broadcaster: UnitBroadcaster,
     receiver: Receiver<UnitEvent>,
-    manager: UnitManager,
+    control: Sender<ManagerControlMessage>,
+    library: UnitLibrary,
 }
-
-// #[cfg(unix)]
-// const LINUX_JIG: &str = r##"
-// [Jig]
-// Name=Linux Jig
-// Description=Development Jig running on Linux
-// TestFile=/etc
-// DefaultScenario=linux-tests
-// DefaultWorkingDirectory=lintests
-// "##;
 
 const GENERIC_JIG: &str = r##"
 [Jig]
@@ -54,12 +45,12 @@ fn make_sleep_test(start: &str, delay: Option<f32>, stop: &str, ret: Option<u32>
 
     let cmd = if let Some(d) = delay {
         format!(
-            "Powershell \"Write-Output {}; start-sleep {}; Write-Output {}; exit {}\"",
+            "Powershell -NoProfile -NonInteractive \"Write-Output {}; Start-Sleep {}; Write-Output {}; exit {}\"",
             start, d, stop, retcode
         )
     } else {
         format!(
-            "Powershell \"Write-Output {}; Write-Output {}; exit {}\"",
+            "Powershell -NoProfile -NonInteractive \"Write-Output {}; Write-Output {}; exit {}\"",
             start, stop, retcode
         )
     };
@@ -76,11 +67,10 @@ ExecStart={}
 impl Exclave {
     pub fn new(timeout: Option<Duration>) -> Exclave {
         let config = Arc::new(Mutex::new(Config::new()));
-
         let broadcaster = UnitBroadcaster::new();
         let receiver = broadcaster.subscribe();
-        let manager = UnitManager::new(&broadcaster, &config);
-        //    let mut unit_library = UnitLibrary::new(&unit_broadcaster, &config);
+        let library = UnitLibrary::new(&broadcaster, &config);
+        let control = library.get_manager().borrow().get_control_channel();
         //    let unit_loader = UnitLoader::new(&unit_broadcaster);
         //    let mut unit_watcher = UnitWatcher::new(&unit_broadcaster);
 
@@ -94,26 +84,31 @@ impl Exclave {
         }
 
         Exclave {
-            config: config,
             broadcaster: broadcaster,
+            library: library,
             receiver: receiver,
-            manager: manager,
+            control: control,
         }
     }
 
-    pub fn add_unit(&self, name: UnitName, unit_text: &str) {
+    pub fn add_unit(&self, name: &UnitName, unit_text: &str) {
+        let name = name.clone();
         match *name.kind() {
             UnitKind::Test => {
                 let desc =
                     TestDescription::from_string(unit_text, name, &PathBuf::from("test/config"))
                         .unwrap();
-                self.manager.load_test(&desc).unwrap();
+                self.library
+                    .get_manager()
+                    .borrow()
+                    .load_test(&desc)
+                    .unwrap();
             }
             UnitKind::Jig => {
                 let desc =
                     JigDescription::from_string(unit_text, name, &PathBuf::from("test/config"))
                         .unwrap();
-                self.manager.load_jig(&desc).unwrap();
+                self.library.get_manager().borrow().load_jig(&desc).unwrap();
             }
             UnitKind::Scenario => {
                 let desc = ScenarioDescription::from_string(
@@ -121,19 +116,64 @@ impl Exclave {
                     name,
                     &PathBuf::from("test/config"),
                 ).unwrap();
-                self.manager.load_scenario(&desc).unwrap();
+                self.library
+                    .get_manager()
+                    .borrow()
+                    .load_scenario(&desc)
+                    .unwrap();
             }
             _ => unimplemented!(),
         };
     }
 
-    pub fn activate(&self, name: UnitName) {
-        self.manager.activate(&name);
+    pub fn rescan(&self) {
+        self.broadcaster.broadcast(&UnitEvent::RescanRequest);
     }
 
-    pub fn deactivate(&self, name: UnitName) {
-        self.manager
-            .deactivate(&name, "test harness requested stop");
+    // pub fn activate(&self, name: &UnitName) {
+    //     self.manager.activate(name);
+    // }
+
+    // pub fn deactivate(&self, name: &UnitName) {
+    //     self.manager
+    //         .deactivate(name, "test harness requested stop");
+    // }
+
+    pub fn start_scenario(&self, name: &UnitName) {
+        let mcmc = ManagerControlMessageContents::StartScenario(Some(name.clone()));
+        self.control
+            .send(ManagerControlMessage::new(name, mcmc))
+            .expect("interface couldn't send exit message to controller");
+    }
+
+    pub fn run_once(&self) -> Result<UnitEvent, RecvError> {
+        let msg = self.receiver.recv()?;
+        self.library.process_message(&msg);
+        Ok(msg)
+    }
+
+    pub fn wait_for_deactivate(&self, name: &UnitName) -> Result<(), RecvError> {
+        loop {
+            let msg = self.run_once()?;
+            println!("Message: {:?}", msg);
+            match msg {
+                UnitEvent::ManagerRequest(ref mrq) => {
+                    let ManagerControlMessage {
+                        sender: ref sender_name,
+                        contents: ref msg,
+                    } = mrq;
+                    match msg {
+                        &ManagerControlMessageContents::ScenarioFinished(code, ref string) => {
+                            println!("Got a Scenario Finished @ {}: {}", code, string);
+                            assert!(sender_name == name);
+                            return Ok(());
+                        }
+                        _ => (),
+                    }
+                }
+                _ => (),
+            }
+        }
     }
 }
 
@@ -141,11 +181,14 @@ impl Exclave {
 /// Ensure that loading works (as a normal sanity test)
 fn load_dependency() {
     let exclave = Exclave::new(None);
-    exclave.add_unit(UnitName::from_str("generic", "jig").unwrap(), GENERIC_JIG);
+    exclave.add_unit(&UnitName::from_str("generic", "jig").unwrap(), GENERIC_JIG);
+    exclave.rescan();
 
     assert!(
         exclave
-            .manager
+            .library
+            .get_manager()
+            .borrow()
             .jig_is_loaded(&UnitName::from_str("generic", "jig").unwrap())
     );
 }
@@ -153,10 +196,11 @@ fn load_dependency() {
 #[test]
 fn basic_scenario() {
     let exclave = Exclave::new(None);
+    let three_name = UnitName::from_str("three", "scenario").unwrap();
 
     for n in 1..=3 {
         exclave.add_unit(
-            UnitName::from_str(&format!("test{}", n), "test").unwrap(),
+            &UnitName::from_str(&format!("test{}", n), "test").unwrap(),
             &make_sleep_test(
                 &format!("test{}-start", n),
                 None,
@@ -165,9 +209,56 @@ fn basic_scenario() {
             ),
         );
     }
+    exclave.add_unit(&three_name, THREE_TEST_SCENARIO);
+    exclave.rescan();
+
+    exclave.start_scenario(&three_name);
+    exclave.wait_for_deactivate(&three_name).unwrap();
+}
+
+#[test]
+fn scenario_execstop() {
+    let exclave = Exclave::new(None);
+    let exec_stop = UnitName::from_str("execstop", "scenario").unwrap();
+
     exclave.add_unit(
-        UnitName::from_str("three", "scenario").unwrap(),
-        THREE_TEST_SCENARIO,
+        &UnitName::from_str("simpletest", "test").unwrap(),
+        &make_sleep_test("begin", None, "end", None),
     );
-    exclave.activate(UnitName::from_str("three", "scenario").unwrap());
+
+    exclave.add_unit(
+        &exec_stop,
+        r##"[Scenario]
+Name=Exec Stop Test
+Description=Run something on stop
+Tests=simpletest
+ExecStop=cmd /c "echo cmd is running"
+"##,
+    );
+    exclave.rescan();
+
+    exclave.start_scenario(&exec_stop);
+
+    // Start running the main loop.  Look for the ExecStop string 'cmd is running'
+    loop {
+        let msg = exclave.run_once().unwrap();
+        println!("Message: {:?}", msg);
+        match msg {
+            UnitEvent::ManagerRequest(ref mrq) => {
+                let ManagerControlMessage {
+                    sender: ref sender_name,
+                    contents: ref msg,
+                } = mrq;
+                match msg {
+                    &ManagerControlMessageContents::Log(ref string) => {
+                        if *sender_name == exec_stop && string == "cmd is running" {
+                            return;
+                        }
+                    }
+                    _ => (),
+                }
+            }
+            _ => (),
+        }
+    }
 }
