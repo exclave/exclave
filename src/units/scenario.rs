@@ -115,6 +115,10 @@ impl ScenarioDescription {
         // Parse the file into a systemd unit_file object
         let mut contents = String::with_capacity(8192);
         File::open(path)?.read_to_string(&mut contents)?;
+        Self::from_string(&contents, unit_name, path)
+    }
+
+    pub fn from_string(contents: &str, unit_name: UnitName, path: &Path) -> Result<ScenarioDescription, UnitDescriptionError> {
         let unit_file = systemd_parser::parse_string(&contents)?;
 
         if !unit_file.has_category("Scenario") {
