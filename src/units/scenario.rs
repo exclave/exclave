@@ -147,6 +147,11 @@ impl ScenarioDescription {
             exec_stop_failure_timeout: None,
         };
 
+        // Use this value as ExecStopSuccess and/or ExecStopFailure if ExecStop is
+        // specified, and either of these two are not specified.
+        let mut exec_stop = None;
+        let mut exec_stop_timeout = None;
+
         for entry in unit_file.lookup_by_category("Scenario") {
             match entry {
                 &DirectiveEntry::Solo(ref directive) => {
@@ -223,12 +228,43 @@ impl ScenarioDescription {
                                 Some(s) => Some(Self::parse_time(s)?),
                             }
                         }
+                        "ExecStop" => {
+                            exec_stop = match directive.value() {
+                                None => None,
+                                Some(s) => Some(s.to_owned()),
+                            }
+                        }
+                        "ExecStopTimeout" => {
+                            exec_stop_timeout = match directive.value() {
+                                None => None,
+                                Some(s) => Some(Self::parse_time(s)?),
+                            }
+                        }
                         &_ => (),
                     }
                 }
                 &_ => (),
             }
         }
+
+        if let Some(s) = exec_stop {
+            if scenario_description.exec_stop_failure.is_none() {
+                scenario_description.exec_stop_failure = Some(s.clone());
+            }
+            if scenario_description.exec_stop_success.is_none() {
+                scenario_description.exec_stop_success = Some(s.clone());
+            }
+        }
+
+        if let Some(s) = exec_stop_timeout {
+            if scenario_description.exec_stop_failure_timeout.is_none() {
+                scenario_description.exec_stop_failure_timeout = Some(s.clone());
+            }
+            if scenario_description.exec_stop_success_timeout.is_none() {
+                scenario_description.exec_stop_success_timeout = Some(s.clone());
+            }
+        }
+
         Ok(scenario_description)
     }
 
