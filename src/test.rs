@@ -40,10 +40,15 @@ Timeout=200
 "##;
 
 #[cfg(windows)]
-fn make_sleep_test(start: &str, delay: Option<f32>, stop: &str, ret: Option<u32>) -> String {
+fn oneliner_write_sleep_write_exit(
+    start: &str,
+    delay: Option<f32>,
+    stop: &str,
+    ret: Option<u32>,
+) -> String {
     let retcode = if let Some(r) = ret { r } else { 0 };
 
-    let cmd = if let Some(d) = delay {
+    if let Some(d) = delay {
         format!(
             "Powershell -NoProfile -NonInteractive \"Write-Output {}; Start-Sleep {}; Write-Output {}; exit {}\"",
             start, d, stop, retcode
@@ -53,7 +58,33 @@ fn make_sleep_test(start: &str, delay: Option<f32>, stop: &str, ret: Option<u32>
             "Powershell -NoProfile -NonInteractive \"Write-Output {}; Write-Output {}; exit {}\"",
             start, stop, retcode
         )
-    };
+    }
+}
+
+#[cfg(unix)]
+fn oneliner_write_sleep_write_exit(
+    start: &str,
+    delay: Option<f32>,
+    stop: &str,
+    ret: Option<u32>,
+) -> String {
+    let retcode = if let Some(r) = ret { r } else { 0 };
+
+    if let Some(d) = delay {
+        format!(
+            "/bin/sh -c \"echo '{}'; sleep {}; echo '{}'; exit {}\"",
+            start, d, stop, retcode
+        )
+    } else {
+        format!(
+            "/bin/sh -c \"echo '{}'; echo '{}'; exit {}\"",
+            start, stop, retcode
+        )
+    }
+}
+
+fn make_sleep_test(start: &str, delay: Option<f32>, stop: &str, ret: Option<u32>) -> String {
+    let cmd = oneliner_write_sleep_write_exit(start, delay, stop, ret);
     format!(
         r##"[Test]
 Name=Sleep and exit
@@ -228,12 +259,13 @@ fn scenario_execstop() {
 
     exclave.add_unit(
         &exec_stop,
-        r##"[Scenario]
+        &format!(r##"[Scenario]
 Name=Exec Stop Test
 Description=Run something on stop
 Tests=simpletest
-ExecStop=cmd /c "echo cmd is running"
+ExecStop={}Powershell -NoProfile -NonInteractive "Write-Output cmd-starting; Start-Sleep 1; Write-Output cmd-ending;"
 "##,
+        oneliner_write_sleep_write_exit("cmd-starting", Some(1.0), "cmd-ending", None))
     );
     exclave.rescan();
 
@@ -251,7 +283,7 @@ ExecStop=cmd /c "echo cmd is running"
                 } = mrq;
                 match msg {
                     &ManagerControlMessageContents::Log(ref string) => {
-                        if *sender_name == exec_stop && string == "cmd is running" {
+                        if *sender_name == exec_stop && string == "cmd-ending" {
                             return;
                         }
                     }
