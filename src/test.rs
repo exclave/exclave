@@ -420,3 +420,67 @@ ExecStopFailure={}
         }
     }
 }
+
+#[test]
+/// Test that "Requires=" works.
+/// Create a test "test-dependent" that
+fn test_requires() {
+    let exclave = Exclave::new(None);
+
+    let scenario_name = UnitName::from_str("scenario", "scenario").unwrap();
+    let master_name = UnitName::from_str("master", "test").unwrap();
+    let dependent_name = UnitName::from_str("dependent", "test").unwrap();
+
+    exclave.add_unit(
+        &dependent_name,
+        &make_sleep_test("begin-dependent", None, "end-dependent", None),
+    );
+
+    let mut master_test = make_sleep_test("begin-master", None, "end-master", None);
+    master_test.push_str("\nRequires=dependent");
+    exclave.add_unit(&master_name, &master_test);
+
+    exclave.add_unit(
+        &scenario_name,
+        r##"[Scenario]
+Name=Exec Stop Test
+Description=Run something on stop
+Tests=master
+"##,
+    );
+    exclave.rescan();
+
+    exclave.start_scenario(&scenario_name);
+    // Ensure dependent_seen goes `true` before master_seen does.
+    let mut master_seen = false;
+    let mut dependent_seen = false;
+    loop {
+        let msg = exclave.run_once().unwrap();
+        println!("Message: {:?}", msg);
+        match msg {
+            UnitEvent::ManagerRequest(ref mrq) => {
+                let ManagerControlMessage {
+                    sender: ref sender_name,
+                    contents: ref msg,
+                } = mrq;
+                match msg {
+                    &ManagerControlMessageContents::Log(ref string) => {
+                        if *sender_name == dependent_name && string == "end-dependent" {
+                            assert!(master_seen == false);
+                            assert!(dependent_seen == false);
+                            dependent_seen = true;
+                        }
+                        if *sender_name == master_name && string == "begin-master" {
+                            assert!(master_seen == false);
+                            assert!(dependent_seen == true);
+                            master_seen = true;
+                            return;
+                        }
+                    }
+                    _ => (),
+                }
+            }
+            _ => (),
+        }
+    }
+}
