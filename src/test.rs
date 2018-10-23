@@ -263,7 +263,7 @@ fn scenario_execstop() {
 Name=Exec Stop Test
 Description=Run something on stop
 Tests=simpletest
-ExecStop={}Powershell -NoProfile -NonInteractive "Write-Output cmd-starting; Start-Sleep 1; Write-Output cmd-ending;"
+ExecStop={}
 "##,
         oneliner_write_sleep_write_exit("cmd-starting", Some(1.0), "cmd-ending", None))
     );
