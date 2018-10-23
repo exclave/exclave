@@ -173,8 +173,8 @@ pub enum ManagerControlMessageContents {
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub struct ManagerControlMessage {
-    sender: UnitName,
-    contents: ManagerControlMessageContents,
+    pub sender: UnitName,
+    pub contents: ManagerControlMessageContents,
 }
 
 impl ManagerControlMessage {
