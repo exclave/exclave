@@ -204,7 +204,7 @@ impl UnitLibrary {
     /// 7. Select all Scenarios.
     /// 8. Activate all Jigs (only the last one will be 'active')
     /// 9. Activate all Interfaces.
-    pub fn rescan(&mut self) {
+    pub fn rescan(&self) {
         self.broadcaster.broadcast(&UnitEvent::RescanStart);
         let mut statuses = self.unit_status.borrow_mut();
 
@@ -381,7 +381,7 @@ impl UnitLibrary {
         self.broadcaster.broadcast(&UnitEvent::RescanFinish);
     }
 
-    pub fn process_message(&mut self, evt: &UnitEvent) {
+    pub fn process_message(&self, evt: &UnitEvent) {
         match evt {
             &UnitEvent::Status(ref msg) =>  {
                 let &UnitStatusEvent {ref name, ref status} = msg;
