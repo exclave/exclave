@@ -259,13 +259,15 @@ fn scenario_execstop() {
 
     exclave.add_unit(
         &exec_stop,
-        &format!(r##"[Scenario]
+        &format!(
+            r##"[Scenario]
 Name=Exec Stop Test
 Description=Run something on stop
 Tests=simpletest
 ExecStop={}
 "##,
-        oneliner_write_sleep_write_exit("cmd-starting", Some(1.0), "cmd-ending", None))
+            oneliner_write_sleep_write_exit("cmd-starting", Some(1.0), "cmd-ending", None)
+        ),
     );
     exclave.rescan();
 
@@ -284,6 +286,130 @@ ExecStop={}
                 match msg {
                     &ManagerControlMessageContents::Log(ref string) => {
                         if *sender_name == exec_stop && string == "cmd-ending" {
+                            return;
+                        }
+                    }
+                    _ => (),
+                }
+            }
+            _ => (),
+        }
+    }
+}
+
+#[test]
+fn scenario_execstopsuccess() {
+    let exclave = Exclave::new(None);
+    let exec_stop = UnitName::from_str("execstopsuccess", "scenario").unwrap();
+
+    exclave.add_unit(
+        &UnitName::from_str("simpletest", "test").unwrap(),
+        &make_sleep_test("begin", None, "end", None),
+    );
+
+    exclave.add_unit(
+        &exec_stop,
+        &format!(
+            r##"[Scenario]
+Name=Exec Stop Test
+Description=Run something on stop
+Tests=simpletest
+ExecStopSuccess={}
+ExecStopFailure={}
+"##,
+            oneliner_write_sleep_write_exit(
+                "cmd-starting-success",
+                Some(1.0),
+                "cmd-ending-success",
+                None
+            ),
+            oneliner_write_sleep_write_exit(
+                "cmd-starting-failure",
+                Some(1.0),
+                "cmd-ending-failure",
+                None
+            )
+        ),
+    );
+    exclave.rescan();
+
+    exclave.start_scenario(&exec_stop);
+
+    // Start running the main loop.  Look for the ExecStop string 'cmd is running'
+    loop {
+        let msg = exclave.run_once().unwrap();
+        println!("Message: {:?}", msg);
+        match msg {
+            UnitEvent::ManagerRequest(ref mrq) => {
+                let ManagerControlMessage {
+                    sender: ref sender_name,
+                    contents: ref msg,
+                } = mrq;
+                match msg {
+                    &ManagerControlMessageContents::Log(ref string) => {
+                        if *sender_name == exec_stop && string == "cmd-ending-success" {
+                            return;
+                        }
+                    }
+                    _ => (),
+                }
+            }
+            _ => (),
+        }
+    }
+}
+
+#[test]
+fn scenario_execstopfailure() {
+    let exclave = Exclave::new(None);
+    let exec_stop = UnitName::from_str("execstopfailure", "scenario").unwrap();
+
+    exclave.add_unit(
+        &UnitName::from_str("simpletest", "test").unwrap(),
+        &make_sleep_test("begin", None, "end", Some(1)),
+    );
+
+    exclave.add_unit(
+        &exec_stop,
+        &format!(
+            r##"[Scenario]
+Name=Exec Stop Test
+Description=Run something on stop
+Tests=simpletest
+ExecStopSuccess={}
+ExecStopFailure={}
+"##,
+            oneliner_write_sleep_write_exit(
+                "cmd-starting-success",
+                Some(1.0),
+                "cmd-ending-success",
+                None
+            ),
+            oneliner_write_sleep_write_exit(
+                "cmd-starting-failure",
+                Some(1.0),
+                "cmd-ending-failure",
+                None
+            )
+        ),
+    );
+    exclave.rescan();
+
+    exclave.start_scenario(&exec_stop);
+
+    // Start running the main loop.  Look for the ExecStop string 'cmd is running'
+    loop {
+        let msg = exclave.run_once().unwrap();
+        println!("Message: {:?}", msg);
+        match msg {
+            UnitEvent::ManagerRequest(ref mrq) => {
+                let ManagerControlMessage {
+                    sender: ref sender_name,
+                    contents: ref msg,
+                } = mrq;
+                match msg {
+                    &ManagerControlMessageContents::Log(ref string) => {
+                        if *sender_name == exec_stop && string == "cmd-ending-failure" {
                             return;
                         }
                     }
