@@ -32,7 +32,7 @@ fn main() {
 
     let unit_broadcaster = UnitBroadcaster::new();
     let message_receiver = unit_broadcaster.subscribe();
-    let mut unit_library = UnitLibrary::new(&unit_broadcaster, &config);
+    let unit_library = UnitLibrary::new(&unit_broadcaster, &config);
     let unit_loader = UnitLoader::new(&unit_broadcaster);
     let mut unit_watcher = UnitWatcher::new(&unit_broadcaster);
 
