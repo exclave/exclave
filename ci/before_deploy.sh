@@ -21,7 +21,13 @@ main() {
     cross rustc --bin exclave --target $TARGET --release -- -C lto
 
     # TODO Update this to package the right artifacts
-    cp target/$TARGET/release/exclave $stage/
+    if [ -e target/$TARGET/release/exclave.exe ]
+    then
+        ext=.exe
+    else
+        ext=
+    fi
+    cp target/$TARGET/release/exclave$ext $stage/
 
     cd $stage
     tar czf $src/$CRATE_NAME-$TRAVIS_TAG-$TARGET.tar.gz *
