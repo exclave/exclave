@@ -621,7 +621,7 @@ impl UnitManager {
                 Err(UnitActivateError::UnitNotSelected)
             } else {
                 // Activate this scenario.
-                self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(id.clone(), format!("activating"))));
+                self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(id.clone(), format!("scenario starting"))));
                 s.borrow_mut().activate(self, &*self.cfg.lock().unwrap())
             }
         }
@@ -705,7 +705,7 @@ impl UnitManager {
                     Ok(())
                 }
                 else {
-                    self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(id.clone(), format!("deactivating"))));
+                    self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(id.clone(), format!("scenario ended"))));
                     current_scenario.deactivate()
                 }
             }
