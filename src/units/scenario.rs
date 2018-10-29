@@ -386,8 +386,8 @@ enum ScenarioState {
     /// The scenario has failed, and is running the ExecStopFailure step
     PostFailure,
 
-    /// The test has succeeded or failed
-    TestFinished,
+    /// The scenario has succeeded or failed
+    ScenarioFinished,
 }
 
 #[derive(PartialEq, Clone, Debug)]
@@ -721,9 +721,9 @@ impl Scenario {
                        test_count,
                        failure_count)
             }
-            ScenarioState::PostFailure => ScenarioState::TestFinished,
-            ScenarioState::PostSuccess => ScenarioState::TestFinished,
-            ScenarioState::TestFinished => ScenarioState::TestFinished,
+            ScenarioState::PostFailure => ScenarioState::ScenarioFinished,
+            ScenarioState::PostSuccess => ScenarioState::ScenarioFinished,
+            ScenarioState::ScenarioFinished => ScenarioState::ScenarioFinished,
         };
 
         // If it's an acceptable new state, set that.  Otherwise, recurse
@@ -782,7 +782,7 @@ impl Scenario {
             ScenarioState::PostFailure => self.description.exec_stop_failure.is_some(),
 
             // Presumably we can always finish a test.
-            ScenarioState::TestFinished => true,
+            ScenarioState::ScenarioFinished => true,
         }
     }
 
@@ -862,6 +862,6 @@ impl Scenario {
     // Determine if Scenario is running or idle
     pub fn is_running(&self) -> bool {
         let s = self.state.borrow();
-        *s != ScenarioState::Idle && *s != ScenarioState::TestFinished
+        *s != ScenarioState::Idle && *s != ScenarioState::ScenarioFinished
     }
 }
