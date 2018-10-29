@@ -1,6 +1,6 @@
 [package]
 name = "exclave"
-version = "0.2.2"
+version = "0.2.3"
 authors = ["Sean Cross <sean@xobs.io>"]
 description = "A frontend for running factory tests"
 license = "BSD-3-Clause"
