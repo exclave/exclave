@@ -7,7 +7,7 @@ use std::time::Duration;
 use config::Config;
 
 use unit::{UnitKind, UnitName};
-use unitbroadcaster::{UnitBroadcaster, UnitEvent};
+use unitbroadcaster::{UnitBroadcaster, UnitEvent, UnitStatus};
 use unitlibrary::UnitLibrary;
 use unitmanager::{ManagerControlMessage, ManagerControlMessageContents};
 
@@ -50,12 +50,14 @@ fn oneliner_write_sleep_write_exit(
 
     if let Some(d) = delay {
         format!(
-            "Powershell -NoProfile -NonInteractive \"Write-Output {}; Start-Sleep {}; Write-Output {}; exit {}\"",
+            "Powershell -NoProfile \"Write-Output {}; Start-Sleep {}; Write-Output {}; exit {}\"",
+            // "cmd /c \"echo {} & timeout /T {} & echo {} & exit {}\"",
             start, d, stop, retcode
         )
     } else {
         format!(
-            "Powershell -NoProfile -NonInteractive \"Write-Output {}; Write-Output {}; exit {}\"",
+            "Powershell -NoProfile \"Write-Output {}; Write-Output {}; exit {}\"",
+            // "cmd /c \"echo {} & echo {} & exit {}\"",
             start, stop, retcode
         )
     }
@@ -292,6 +294,14 @@ ExecStop={}
                     _ => (),
                 }
             }
+            // If a "STOP" event is received before the command is run, that's a problem.
+            UnitEvent::Status(ref s) => {
+                if s.name.kind() == &UnitKind::Scenario {
+                    if let UnitStatus::DeactivatedSuccessfully(ref msg) = s.status {
+                        panic!("unit {} deactivated before success script was run (success: {})", s.name, msg);
+                    }
+                }
+            }
             _ => (),
         }
     }
@@ -352,6 +362,14 @@ ExecStopFailure={}
                         }
                     }
                     _ => (),
+                }
+            }
+            // If a "STOP" event is received before the command is run, that's a problem.
+            UnitEvent::Status(ref s) => {
+                if s.name.kind() == &UnitKind::Scenario {
+                    if let UnitStatus::DeactivatedSuccessfully(ref msg) = s.status {
+                        panic!("unit {} deactivated before success script was run (success: {})", s.name, msg);
+                    }
                 }
             }
             _ => (),
@@ -416,6 +434,14 @@ ExecStopFailure={}
                     _ => (),
                 }
             }
+            // If a "STOP" event is received before the command is run, that's a problem.
+            UnitEvent::Status(ref s) => {
+                if s.name.kind() == &UnitKind::Scenario {
+                    if let UnitStatus::DeactivatedSuccessfully(ref msg) = s.status {
+                        panic!("unit {} deactivated before failure script was run (success: {})", s.name, msg);
+                    }
+                }
+            }
             _ => (),
         }
     }
@@ -478,6 +504,14 @@ Tests=master
                         }
                     }
                     _ => (),
+                }
+            }
+            // If a "STOP" event is received before the command is run, that's a problem.
+            UnitEvent::Status(ref s) => {
+                if s.name.kind() == &UnitKind::Scenario {
+                    if let UnitStatus::DeactivatedSuccessfully(ref msg) = s.status {
+                        panic!("unit {} deactivated before strings were found (success: {})", s.name, msg);
+                    }
                 }
             }
             _ => (),
