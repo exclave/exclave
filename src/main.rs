@@ -44,7 +44,8 @@ fn main() {
     }).expect("Error setting Ctrl-C handler");
 
     let matches = App::new("Exclave Testing System")
-        .version("1.0")
+        .version(env!("CARGO_PKG_VERSION"))
+        .long_version(env!("GIT_VERSION"))
         .author("Sean Cross <sean@xobs.io>")
         .about("Orchestrates the Common Factory Test Interface server")
         .arg(
