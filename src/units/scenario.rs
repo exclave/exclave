@@ -848,7 +848,7 @@ impl Scenario {
     }
 
     // Post messages and terminate tests.
-    pub fn finish_scenario(&self, ctrl: &Sender<ManagerControlMessage>) {
+    fn finish_scenario(&self, ctrl: &Sender<ManagerControlMessage>) {
         let failures = *self.failures.borrow();
         for test in &self.test_sequence {
             // Stop the test.  This will catch normal tests and daemons.
