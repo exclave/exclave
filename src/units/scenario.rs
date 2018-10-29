@@ -628,21 +628,26 @@ impl Scenario {
 
             // If we're transitioning to the Finshed state, it means we just finished
             // running some tests.  Broadcast the result.
-            ScenarioState::TestFinished => self.finish_scenario(ctrl),
+            ScenarioState::ScenarioFinished => self.finish_scenario(ctrl),
         }
     }
 
     /// Run a support command (i.e. ExecStart, ExecStopSuccess, or ExecStopFailure).
     /// Will emit an AdvanceScenario message upon completion.
-    fn run_support_cmd(&self, cmd: &String, ctrl: &Sender<ManagerControlMessage>, timeout: &Option<Duration>, _testname: &str) {
-        let mut cmd = Runny::new(cmd);
+    fn run_support_cmd(&self, cmd: &String, ctrl: &Sender<ManagerControlMessage>, timeout: &Option<Duration>, testname: &str) {
+        ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::Log(format!("{}: starting [{}]", testname, cmd)))).ok();
+        let mut run_cmd = Runny::new(cmd);
         if let Some(timeout) = *timeout {
-            cmd.timeout(timeout);
+            run_cmd.timeout(timeout);
         }
-        cmd.directory(&Some(self.support_wd.borrow().clone()));
-        let mut running = match cmd.start() {
+        run_cmd.directory(&Some(self.support_wd.borrow().clone()));
+        let mut running = match run_cmd.start() {
             Ok(o) => o,
-            Err(e) => unimplemented!(),
+            Err(e) => {
+                ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::LogError(format!("{}: unable to run command: {:?}", testname, e)))).ok();
+                ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::AdvanceScenario(1))).ok();
+                return;
+            }
         };
 
         self.log_output(ctrl, &mut running);
@@ -651,9 +656,12 @@ impl Scenario {
         let thr_waiter = running.waiter();
         let thr_control = ctrl.clone();
         let id = self.id().clone();
+        let thr_cmd = cmd.clone();
+        let thr_testname = testname.to_owned();
         thread::spawn(move || {
             thr_waiter.wait();
             thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(thr_waiter.result()))).ok();
+            thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::Log(format!("{}: finished [{}]", thr_testname, thr_cmd)))).ok();
         });
 
         *self.program.borrow_mut() = Some(running);
