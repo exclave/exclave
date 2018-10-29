@@ -216,6 +216,18 @@ impl ScenarioDescription {
                                 Some(s) => Some(Self::parse_time(s)?),
                             }
                         }
+                        "ExecStopFail" => {
+                            scenario_description.exec_stop_failure = match directive.value() {
+                                None => None,
+                                Some(s) => Some(s.to_owned()),
+                            }
+                        }
+                        "ExecStopFailTimeout" => {
+                            scenario_description.exec_stop_failure_timeout = match directive.value() {
+                                None => None,
+                                Some(s) => Some(Self::parse_time(s)?),
+                            }
+                        }
                         "ExecStopFailure" => {
                             scenario_description.exec_stop_failure = match directive.value() {
                                 None => None,
