@@ -7,6 +7,7 @@ main() {
     pwd
     ls -la
     which git || true
+    set
 
     local src=$(pwd) \
           stage=
