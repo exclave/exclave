@@ -3,6 +3,11 @@
 set -ex
 
 main() {
+    export RUST_BACKTRACE=1
+    pwd
+    ls -la
+    which git || true
+
     local src=$(pwd) \
           stage=
 
@@ -29,6 +34,8 @@ main() {
     fi
     cp target/$TARGET/release/exclave$ext $stage/
 
+    find .
+    ls -la
     cd $stage
     tar czf $src/$CRATE_NAME-$TRAVIS_TAG-$TARGET.tar.gz *
     cd $src
