@@ -6,7 +6,8 @@ set -ex
 main() {
     export RUST_BACKTRACE=1
     pwd
-    ls -l
+    ls -la
+    which git || true
     cross build --target $TARGET
     cross build --target $TARGET --release
 
