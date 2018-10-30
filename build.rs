@@ -9,18 +9,26 @@ use std::process::Command;
 /// extern crate git_version;
 /// fn main() { git_version::set_env_with_name("CARGO_PKG_VERSION"); }
 /// ```
+use std::env;
 fn set_env_with_name(name: &str) {
-    let cmd = match Command::new("git")
+    let ver = match Command::new("git")
         .args(&["describe", "--tags", "--dirty=-modified"])
         .output()
     {
-        Ok(rev) => rev,
-        Err(e) => panic!("unable to run git to get package version: {:?}", e),
-    };
-    assert!(cmd.status.success());
-    let ver = match std::str::from_utf8(&cmd.stdout[..]) {
-        Ok(v) => v.trim(),
-        Err(e) => panic!("unable to convert version number from utf8: {:?}", e),
+        Ok(cmd) => {
+            assert!(cmd.status.success());
+            match std::str::from_utf8(&cmd.stdout[..]) {
+                Ok(v) => v.trim().to_owned(),
+                Err(_) => match env::var(name) {
+                    Ok(val) => val.trim().to_owned(),
+                    Err(_) => "invalid-git-version".to_owned(),
+                }
+            }
+        }
+        Err(_) => match env::var(name) {
+            Ok(val) => val.trim().to_owned(),
+            Err(_) => "no-git-version".to_owned(),
+        }
     };
     println!("cargo:rustc-env={}={}", name, ver);
     println!("cargo:rerun-if-changed=.git/HEAD");
@@ -29,7 +37,6 @@ fn set_env_with_name(name: &str) {
     println!("cargo:rerun-if-env-changed={}", name);
 }
 
-use std::env;
 fn main() {
     env::set_var("RUST_BACKTRACE", "1");
     set_env_with_name("GIT_VERSION");
