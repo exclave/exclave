@@ -32,8 +32,6 @@ main() {
     fi
     cp target/$TARGET/release/exclave$ext $stage/
 
-    find .
-    ls -la
     cd $stage
     tar czf $src/$CRATE_NAME-$TRAVIS_TAG-$TARGET.tar.gz *
     cd $src
