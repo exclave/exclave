@@ -4,6 +4,9 @@ set -ex
 
 # TODO This is the "test phase", tweak it as you see fit
 main() {
+    export RUST_BACKTRACE=1
+    pwd
+    ls -l
     cross build --target $TARGET
     cross build --target $TARGET --release
 
