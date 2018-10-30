@@ -3,11 +3,8 @@
 set -ex
 
 main() {
-    export RUST_BACKTRACE=1
-    pwd
-    ls -la
-    which git || true
-    set
+
+    export GIT_VERSION=$(git describe --tags --dirty=-modified)
 
     local src=$(pwd) \
           stage=

@@ -4,10 +4,9 @@ set -ex
 
 # TODO This is the "test phase", tweak it as you see fit
 main() {
-    export RUST_BACKTRACE=1
-    pwd
-    ls -la
-    which git || true
+
+    export GIT_VERSION=$(git describe --tags --dirty=-modified)
+
     cross build --target $TARGET
     cross build --target $TARGET --release
 
