@@ -16,13 +16,17 @@ fn set_env_with_name(name: &str) {
         .output()
     {
         Ok(cmd) => {
-            assert!(cmd.status.success());
-            match std::str::from_utf8(&cmd.stdout[..]) {
-                Ok(v) => v.trim().to_owned(),
-                Err(_) => match env::var(name) {
-                    Ok(val) => val.trim().to_owned(),
-                    Err(_) => "invalid-git-version".to_owned(),
-                }
+            if cmd.status.success() {
+                    match std::str::from_utf8(&cmd.stdout[..]) {
+                        Ok(v) => v.trim().to_owned(),
+                        Err(_) => match env::var(name) {
+                            Ok(val) => val.trim().to_owned(),
+                            Err(_) => "invalid-git-version".to_owned(),
+                        }
+                    }
+            }
+            else {
+                "no-git-version".to_owned()
             }
         }
         Err(_) => match env::var(name) {
