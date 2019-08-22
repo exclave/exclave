@@ -518,3 +518,97 @@ Tests=master
         }
     }
 }
+
+#[test]
+/// Test that "Provides=" works.
+/// Create one scenario with two tests that could work,
+/// but only one that is compatible.
+fn test_provides() {
+    let exclave = Exclave::new(None);
+
+    let jig_name = UnitName::from_str("test", "jig").unwrap();
+    let scenario_name = UnitName::from_str("scenario", "scenario").unwrap();
+    let compatible_name = UnitName::from_str("compatible", "test").unwrap();
+    let incompatible_name = UnitName::from_str("incompatible", "test").unwrap();
+
+    exclave.add_unit(
+        &jig_name,
+        r##"[Jig]
+Name=Exclave Test
+Description=Sample exclave jig
+"##,
+    );
+
+    exclave.add_unit(
+        &scenario_name,
+        r##"[Scenario]
+Name=Check Provides Capability
+Description=Make sure the Provides= feature works.
+Tests=compatibility
+"##,
+    );
+
+    exclave.add_unit(
+        &compatible_name,
+        r##"[Test]
+Name=Compatible Test
+Description=This test is compatible
+Provides=compatibility
+Jigs=test.jig
+"##,
+    );
+
+    exclave.add_unit(
+        &incompatible_name,
+        r##"[Test]
+Name=Incompatible Test
+Description=This test is not compatible
+Provides=compatibility
+Jigs=other.jig
+"##,
+    );
+
+    exclave.rescan();
+
+    exclave.start_scenario(&scenario_name);
+    // Ensure dependent_seen goes `true` before master_seen does.
+    // let mut master_seen = false;
+    // let mut dependent_seen = false;
+    loop {
+        let msg = exclave.run_once().unwrap();
+        println!("Message: {:?}", msg);
+        match msg {
+            UnitEvent::ManagerRequest(ref mrq) => {
+                let ManagerControlMessage {
+                    sender: ref sender_name,
+                    contents: ref msg,
+                } = mrq;
+                // match msg {
+                //     &ManagerControlMessageContents::Log(ref string) => {
+                //         if *sender_name == dependent_name && string == "end-dependent" {
+                //             assert!(master_seen == false);
+                //             assert!(dependent_seen == false);
+                //             dependent_seen = true;
+                //         }
+                //         if *sender_name == master_name && string == "begin-master" {
+                //             assert!(master_seen == false);
+                //             assert!(dependent_seen == true);
+                //             master_seen = true;
+                //             return;
+                //         }
+                //     }
+                //     _ => (),
+                // }
+            }
+            // If a "STOP" event is received before the command is run, that's a problem.
+            UnitEvent::Status(ref s) => {
+                if s.name.kind() == &UnitKind::Scenario {
+                    if let UnitStatus::DeactivatedSuccessfully(ref msg) = s.status {
+                        panic!("unit {} deactivated before strings were found (success: {})", s.name, msg);
+                    }
+                }
+            }
+            _ => (),
+        }
+    }
+}
