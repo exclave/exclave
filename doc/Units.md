@@ -31,7 +31,7 @@ Test specifications are defined under a "[Test]" section.
 * Timeout: The maximum number of seconds that this test may be run for before it times out, is killed, and marked failure.
 * Type: One of "simple" or "daemon".  For "simple" tests, the return code will indicate pass or fail, and each line printed will be considered progress.  For "daemon", the testing procedure will continue as soon as DaemonReadyText is read on stdout.  The daemon must not call fork()/exit(), and must remain in the foreground.
 * DaemonReadyText: A string to look for on the test's stdout to indicate the daemon is ready.  If missing, the daemon is assumed to be ready immediately.  May be a regex.
-* CompatibleJigs: A comma-separated list of jigs that this test is compatible with.  If unspecified, any jig is acceptable.
+* Jigs: A comma-separated list of jigs that this test is compatible with.  If unspecified, any jig is acceptable.
 * ExecStart: The command to run as part of this test.
 * ExecStopFail: When stopping tests, if the test failed, then this stop command will be run.
 * ExecStopSuccess: When stopping tests, if the test succeeded, then this stop command will be run.
