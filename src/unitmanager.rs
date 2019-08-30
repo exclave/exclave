@@ -385,7 +385,17 @@ impl UnitManager {
         Ok(())
     }
 
-    fn select_test(&self, id: &UnitName) -> Result<(), UnitSelectError> { 
+    fn select_test(&self, id: &UnitName) -> Result<(), UnitSelectError> {
+        let compatible_jigs = vec![];
+        // Loop through all tests and get a list of compatible jigs.
+        // If we find multiple tests that match, raise an error.
+        for (ref test_id, test) in &*self.tests.borrow() {
+            for provides in (**test).provides() {
+                if provides == id {
+                    compatible_jigs.push(id.clone());
+                }
+            }
+        }
         match self.tests.borrow().get(id) {
             Some(ref s) => s.borrow_mut().select(self),
             None => Err(UnitSelectError::UnitNotFound),

@@ -156,8 +156,12 @@ impl TestDescription {
                         }
                         "Provides" => {
                             test_description.provides = match directive.value() {
-                                Some(s) => UnitName::from_list(s, "test")?,
-                                None => vec![],
+                                Some(s) => {
+                                    let mut provides_list = UnitName::from_list(s, "test")?;
+                                    provides_list.push(test_description.id.clone());
+                                    provides_list
+                                },
+                                None => vec![test_description.id.clone()],
                             }
                         }
                         "Requires" => {
@@ -302,6 +306,7 @@ impl Test {
                 }
             }
             if ! compatible {
+                panic!("Incompatible!");
                 return Err(UnitSelectError::NoCompatibleJig);
             }
         }
@@ -507,6 +512,10 @@ impl Test {
                 }
             }
         });
+    }
+
+    fn provides(&self) -> &Vec<UnitName> {
+        &self.description.provides
     }
 }
 
