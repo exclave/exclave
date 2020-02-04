@@ -106,6 +106,9 @@ pub struct ScenarioDescription {
 
     /// The maximum amount of time to allow the "failure" script to run for.
     exec_stop_failure_timeout: Option<Duration>,
+
+    // The maximum amount of failures before the scenario should be stopped.
+    stop_after_failure_count: Option<u32>,
 }
 
 impl ScenarioDescription {
@@ -145,6 +148,7 @@ impl ScenarioDescription {
             exec_stop_success_timeout: None,
             exec_stop_failure: None,
             exec_stop_failure_timeout: None,
+            stop_after_failure_count: None,
         };
 
         // Use this value as ExecStopSuccess and/or ExecStopFailure if ExecStop is
@@ -250,6 +254,12 @@ impl ScenarioDescription {
                             exec_stop_timeout = match directive.value() {
                                 None => None,
                                 Some(s) => Some(Self::parse_time(s)?),
+                            }
+                        }
+                        "StopAfterFailureCount" => {
+                            scenario_description.stop_after_failure_count = match directive.value() {
+                                None => None,
+                                Some(s) => Some(s.parse::<u32>()?),
                             }
                         }
                         &_ => (),
@@ -716,7 +726,20 @@ impl Scenario {
             ScenarioState::PreStart => ScenarioState::Running(0),
 
             // If we just finished running a test, determine the next test to run.
-            ScenarioState::Running(i) if (i + 1) < test_count => ScenarioState::Running(i + 1),
+            ScenarioState::Running(i) if (i + 1) < test_count => {
+                match self.description.stop_after_failure_count {
+                    Some(count) => {
+                        if failure_count >= count {
+                            ScenarioState::PostFailure
+                        } else {
+                            ScenarioState::Running(i + 1)
+                        }
+                    },
+                    None => {
+                        ScenarioState::Running(i + 1)
+                    }
+                }
+            },
             ScenarioState::Running(i) if (i + 1) >= test_count && failure_count > 0 => {
                 ScenarioState::PostFailure
             }
