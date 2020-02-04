@@ -316,6 +316,7 @@ pub enum UnitDescriptionError {
     ParseError(ParserError),
     RegexError(self::regex::Error),
     HumantimeError(DurationError),
+    ParseIntError(std::num::ParseIntError),
     InvalidValue(
         String,      // Section name
         String,      // Key name
@@ -354,6 +355,12 @@ impl From<DurationError> for UnitDescriptionError {
     }
 }
 
+impl From<std::num::ParseIntError> for UnitDescriptionError {
+    fn from(error: std::num::ParseIntError) -> Self {
+        UnitDescriptionError::ParseIntError(error)
+    }
+}
+
 impl fmt::Display for UnitDescriptionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use std::error::Error;
@@ -376,6 +383,9 @@ impl fmt::Display for UnitDescriptionError {
             &UnitDescriptionError::RegexError(ref e) => write!(f, "unable to parse regex: {}", e),
             &UnitDescriptionError::MissingValue(ref sec, ref key) => {
                 write!(f, "key '{}' in section '{}' requires a value", key, sec)
+            }
+            &UnitDescriptionError::ParseIntError(ref e) => {
+                write!(f, "int parse error: {}", e.description())
             }
             &UnitDescriptionError::InvalidValue(ref sec, ref key, ref val, ref allowed) => write!(
                 f,

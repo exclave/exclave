@@ -63,6 +63,7 @@ Scenarios are distinct items that need to be tested.  There will probably be a "
 * WorkingDirectory: Directory to run the programs from.
 * Timeout: Maximum number of seconds this scenario should take.
 * Assume: A list of tests that are assumed to have passed.  Useful for making abbreviated unit tests.
+* StopAfterFailureCount: Number of tests that can fail before the scenario should stop running.
 
 
 .trigger
