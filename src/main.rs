@@ -79,6 +79,12 @@ fn main() {
                 .required(false)
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("KEYBOARD_TRIGGER")
+                .short("k")
+                .long("keyboard-trigger")
+                .help("Run default scenario on enter key press"),
+        )
         .get_matches();
 
     let config_dirs: Vec<_> = matches.values_of("CONFIG_DIR").unwrap().collect();
@@ -90,7 +96,7 @@ fn main() {
         None
     };
 
-    terminal::TerminalInterface::start(output_type, unit_broadcaster.subscribe());
+    terminal::TerminalInterface::start(output_type, &unit_broadcaster, matches.is_present("KEYBOARD_TRIGGER"));
 
     for config_dir in config_dirs {
         unit_watcher

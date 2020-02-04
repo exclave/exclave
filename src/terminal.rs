@@ -5,7 +5,9 @@ use unit::{UnitKind, UnitName};
 use unitbroadcaster::{LogEntry, UnitCategoryStatus, UnitEvent, UnitStatus};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::mpsc::Receiver;
+use unitbroadcaster::{UnitBroadcaster};
 use std::thread;
+use unitmanager::{ManagerControlMessage, ManagerControlMessageContents};
 
 #[derive(PartialEq)]
 pub enum TerminalOutputType {
@@ -43,13 +45,14 @@ pub struct TerminalInterface {
 }
 
 impl TerminalInterface {
-    pub fn start(output_type: Option<TerminalOutputType>, receiver: Receiver<UnitEvent>) {
+    pub fn start(output_type: Option<TerminalOutputType>, broadcaster: &UnitBroadcaster, monitor_keypress: bool) {
         let stdout = Term::stdout();
         let output_type = match output_type {
             Some(s) => s,
             None if stdout.is_term() => TerminalOutputType::Fancy,
             None => TerminalOutputType::Plain,
         };
+        let receiver = broadcaster.subscribe();
 
         thread::spawn(move || {
             let mut ti = TerminalInterface {
@@ -67,6 +70,22 @@ impl TerminalInterface {
             }
             eprintln!("Receiver has closed -- shutting down");
         });
+
+        if monitor_keypress {
+            let id = UnitName::internal("terminal");
+            let thread_broadcaster = broadcaster.clone();
+
+            // Broadcast a start scenario message if an enter key is pressed in the terminal where exclave is running
+            // Could possibly be extended to do things like, run test #1 when the '1' key is entered or print stats when
+            // the '?' key is entered
+            thread::spawn(move || {
+                loop {
+                    let mut line = String::new();
+                    std::io::stdin().read_line(&mut line).expect("Failed to read line");
+                    thread_broadcaster.broadcast(&UnitEvent::ManagerRequest(ManagerControlMessage::new(&id, ManagerControlMessageContents::StartScenario(None))));
+                }
+            });
+        }
     }
 
     fn update_unit(&mut self, event: UnitEvent) {
