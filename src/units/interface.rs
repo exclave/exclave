@@ -504,8 +504,8 @@ impl Interface {
                         ManagerControlMessageContents::Shutdown(Some(words.join(" ")))
                     }
                 }
+                "abort" => ManagerControlMessageContents::AbortTests,
                 /*
-                "abort" => ControlMessageContents::AbortTests,
                 "pong" => ControlMessageContents::Pong(words[0].to_lowercase()),
                 "hello" => ControlMessageContents::Hello(words.join(" ")),
                 */

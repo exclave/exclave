@@ -560,6 +560,10 @@ impl Scenario {
         &self.description.description
     }
 
+    pub fn indicate_failure(&self) {
+        *self.failures.borrow_mut() += 1;
+    }
+
     // Given the current state, figure out the next test to run (if any)
     pub fn advance(
         &self,

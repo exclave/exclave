@@ -189,6 +189,9 @@ pub enum ManagerControlMessageContents {
 
     /// Shutdown the entire system
     Shutdown(Option<String>),
+
+    /// Abort the currently-running tests
+    AbortTests,
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
@@ -1059,6 +1062,14 @@ impl UnitManager {
                     txt,
                 )));
                 self.bc.broadcast(&UnitEvent::Shutdown);
+            }
+            ManagerControlMessageContents::AbortTests => {
+                if let Some(scenario) = &mut self.current_scenario.borrow_mut().take() {
+                    scenario.borrow().indicate_failure();
+                    for test in (&*self.tests.borrow()).values() {
+                        test.borrow().deactivate(self).ok();
+                    }
+                }
             }
         }
     }
