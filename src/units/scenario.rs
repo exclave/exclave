@@ -7,23 +7,24 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
-use std::sync::mpsc::Sender;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use self::dependy::{Dependy, Dependency};
+use self::dependy::{Dependency, Dependy};
 use self::humantime::{parse_duration, DurationError};
-use self::runny::Runny;
 use self::runny::running::Running;
+use self::runny::Runny;
 use self::systemd_parser::items::DirectiveEntry;
 
 use config::Config;
-use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason,
-           UnitName, UnitSelectError, UnitDeselectError};
-use unitmanager::{ManagerControlMessage, ManagerControlMessageContents,
-                  UnitManager};
+use unit::{
+    UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitDeselectError,
+    UnitIncompatibleReason, UnitName, UnitSelectError,
+};
+use unitmanager::{ManagerControlMessage, ManagerControlMessageContents, UnitManager};
 use units::test::Test;
 
 struct AssumptionDependency {
@@ -36,7 +37,7 @@ struct AssumptionDependency {
 impl AssumptionDependency {
     pub fn new(name: UnitName) -> AssumptionDependency {
         AssumptionDependency {
-            name: name,
+            name,
             requirements: vec![],
             suggestions: vec![],
             provides: vec![],
@@ -121,8 +122,12 @@ impl ScenarioDescription {
         Self::from_string(&contents, unit_name, path)
     }
 
-    pub fn from_string(contents: &str, unit_name: UnitName, path: &Path) -> Result<ScenarioDescription, UnitDescriptionError> {
-        let unit_file = systemd_parser::parse_string(&contents)?;
+    pub fn from_string(
+        contents: &str,
+        unit_name: UnitName,
+        path: &Path,
+    ) -> Result<ScenarioDescription, UnitDescriptionError> {
+        let unit_file = systemd_parser::parse_string(contents)?;
 
         if !unit_file.has_category("Scenario") {
             return Err(UnitDescriptionError::MissingSection("Scenario".to_owned()));
@@ -157,115 +162,98 @@ impl ScenarioDescription {
         let mut exec_stop_timeout = None;
 
         for entry in unit_file.lookup_by_category("Scenario") {
-            match entry {
-                &DirectiveEntry::Solo(ref directive) => {
-                    match directive.key() {
-                        "Name" => {
-                            scenario_description.name = directive.value().unwrap_or("").to_owned()
-                        }
-                        "Description" => {
-                            scenario_description.description =
-                                directive.value().unwrap_or("").to_owned()
-                        }
-                        "Jigs" => {
-                            scenario_description.jigs = match directive.value() {
-                                Some(s) => UnitName::from_list(s, "jig")?,
-                                None => vec![],
-                            }
-                        }
-                        "WorkingDirectory" => {
-                            if let Some(wd) = directive.value() {
-                                Some(PathBuf::from(wd));
-                            }
-                        }
-                        "Tests" => {
-                            scenario_description.tests = match directive.value() {
-                                Some(s) => UnitName::from_list(s, "test")?,
-                                None => vec![],
-                            }
-                        }
-                        "Assume" => {
-                            scenario_description.assumptions = match directive.value() {
-                                Some(s) => UnitName::from_list(s, "test")?,
-                                None => vec![],
-                            }
-                        }
-                        "ExecStart" => {
-                            scenario_description.exec_start = match directive.value() {
-                                None => None,
-                                Some(s) => Some(s.to_owned()),
-                            }
-                        }
-                        "ExecStartTimeout" => {
-                            scenario_description.exec_start_timeout = match directive.value() {
-                                None => None,
-                                Some(s) => Some(Self::parse_time(s)?),
-                            }
-                        }
-                        "Timeout" => {
-                            scenario_description.timeout = match directive.value() {
-                                None => None,
-                                Some(s) => Some(Self::parse_time(s)?),
-                            }
-                        }
-                        "ExecStopSuccess" => {
-                            scenario_description.exec_stop_success = match directive.value() {
-                                None => None,
-                                Some(s) => Some(s.to_owned()),
-                            }
-                        }
-                        "ExecStopSuccessTimeout" => {
-                            scenario_description.exec_stop_success_timeout = match directive.value() {
-                                None => None,
-                                Some(s) => Some(Self::parse_time(s)?),
-                            }
-                        }
-                        "ExecStopFail" => {
-                            scenario_description.exec_stop_failure = match directive.value() {
-                                None => None,
-                                Some(s) => Some(s.to_owned()),
-                            }
-                        }
-                        "ExecStopFailTimeout" => {
-                            scenario_description.exec_stop_failure_timeout = match directive.value() {
-                                None => None,
-                                Some(s) => Some(Self::parse_time(s)?),
-                            }
-                        }
-                        "ExecStopFailure" => {
-                            scenario_description.exec_stop_failure = match directive.value() {
-                                None => None,
-                                Some(s) => Some(s.to_owned()),
-                            }
-                        }
-                        "ExecStopFailureTimeout" => {
-                            scenario_description.exec_stop_failure_timeout = match directive.value() {
-                                None => None,
-                                Some(s) => Some(Self::parse_time(s)?),
-                            }
-                        }
-                        "ExecStop" => {
-                            exec_stop = match directive.value() {
-                                None => None,
-                                Some(s) => Some(s.to_owned()),
-                            }
-                        }
-                        "ExecStopTimeout" => {
-                            exec_stop_timeout = match directive.value() {
-                                None => None,
-                                Some(s) => Some(Self::parse_time(s)?),
-                            }
-                        }
-                        "StopAfterFailureCount" => {
-                            scenario_description.stop_after_failure_count = match directive.value() {
-                                None => None,
-                                Some(s) => Some(s.parse::<u32>()?),
-                            }
-                        }
-                        &_ => (),
+            if let DirectiveEntry::Solo(ref directive) = entry {
+                match directive.key() {
+                    "Name" => {
+                        scenario_description.name = directive.value().unwrap_or("").to_owned()
                     }
+                    "Description" => {
+                        scenario_description.description =
+                            directive.value().unwrap_or("").to_owned()
+                    }
+                    "Jigs" => {
+                        scenario_description.jigs = match directive.value() {
+                            Some(s) => UnitName::from_list(s, "jig")?,
+                            None => vec![],
+                        }
+                    }
+                    "WorkingDirectory" => {
+                        if let Some(wd) = directive.value() {
+                            PathBuf::from(wd);
+                        }
+                    }
+                    "Tests" => {
+                        scenario_description.tests = match directive.value() {
+                            Some(s) => UnitName::from_list(s, "test")?,
+                            None => vec![],
+                        }
+                    }
+                    "Assume" => {
+                        scenario_description.assumptions = match directive.value() {
+                            Some(s) => UnitName::from_list(s, "test")?,
+                            None => vec![],
+                        }
+                    }
+                    "ExecStart" => {
+                        scenario_description.exec_start = directive.value().map(|s| s.to_owned())
+                    }
+                    "ExecStartTimeout" => {
+                        scenario_description.exec_start_timeout = match directive.value() {
+                            None => None,
+                            Some(s) => Some(Self::parse_time(s)?),
+                        }
+                    }
+                    "Timeout" => {
+                        scenario_description.timeout = match directive.value() {
+                            None => None,
+                            Some(s) => Some(Self::parse_time(s)?),
+                        }
+                    }
+                    "ExecStopSuccess" => {
+                        scenario_description.exec_stop_success =
+                            directive.value().map(|s| s.to_owned())
+                    }
+                    "ExecStopSuccessTimeout" => {
+                        scenario_description.exec_stop_success_timeout = match directive.value() {
+                            None => None,
+                            Some(s) => Some(Self::parse_time(s)?),
+                        }
+                    }
+                    "ExecStopFail" => {
+                        scenario_description.exec_stop_failure =
+                            directive.value().map(|s| s.to_owned())
+                    }
+                    "ExecStopFailTimeout" => {
+                        scenario_description.exec_stop_failure_timeout = match directive.value() {
+                            None => None,
+                            Some(s) => Some(Self::parse_time(s)?),
+                        }
+                    }
+                    "ExecStopFailure" => {
+                        scenario_description.exec_stop_failure =
+                            directive.value().map(|s| s.to_owned())
+                    }
+                    "ExecStopFailureTimeout" => {
+                        scenario_description.exec_stop_failure_timeout = match directive.value() {
+                            None => None,
+                            Some(s) => Some(Self::parse_time(s)?),
+                        }
+                    }
+                    "ExecStop" => exec_stop = directive.value().map(|s| s.to_owned()),
+                    "ExecStopTimeout" => {
+                        exec_stop_timeout = match directive.value() {
+                            None => None,
+                            Some(s) => Some(Self::parse_time(s)?),
+                        }
+                    }
+                    "StopAfterFailureCount" => {
+                        scenario_description.stop_after_failure_count = match directive.value() {
+                            None => None,
+                            Some(s) => Some(s.parse::<u32>()?),
+                        }
+                    }
+                    &_ => (),
                 }
-                &_ => (),
             }
         }
 
@@ -274,16 +262,16 @@ impl ScenarioDescription {
                 scenario_description.exec_stop_failure = Some(s.clone());
             }
             if scenario_description.exec_stop_success.is_none() {
-                scenario_description.exec_stop_success = Some(s.clone());
+                scenario_description.exec_stop_success = Some(s);
             }
         }
 
         if let Some(s) = exec_stop_timeout {
             if scenario_description.exec_stop_failure_timeout.is_none() {
-                scenario_description.exec_stop_failure_timeout = Some(s.clone());
+                scenario_description.exec_stop_failure_timeout = Some(s);
             }
             if scenario_description.exec_stop_success_timeout.is_none() {
-                scenario_description.exec_stop_success_timeout = Some(s.clone());
+                scenario_description.exec_stop_success_timeout = Some(s);
             }
         }
 
@@ -308,15 +296,16 @@ impl ScenarioDescription {
     }
 
     /// Determine if a unit is compatible with this system.
-    pub fn is_compatible(&self,
-                         manager: &UnitManager,
-                         _: &Config)
-                         -> Result<(Vec<UnitName>, Dependy<UnitName>), UnitIncompatibleReason> {
+    pub fn is_compatible(
+        &self,
+        manager: &UnitManager,
+        _: &Config,
+    ) -> Result<(Vec<UnitName>, Dependy<UnitName>), UnitIncompatibleReason> {
         // If there is at least one jig present, ensure that it is loaded.
-        if self.jigs.len() > 0 {
+        if !self.jigs.is_empty() {
             let mut loaded = false;
             for jig_name in &self.jigs {
-                if manager.jig_is_loaded(&jig_name) {
+                if manager.jig_is_loaded(jig_name) {
                     loaded = true;
                 }
             }
@@ -331,18 +320,19 @@ impl ScenarioDescription {
         self.get_test_order(manager)
     }
 
-    pub fn load(&self,
-                  manager: &UnitManager,
-                  config: &Config)
-                  -> Result<Scenario, UnitIncompatibleReason> {
+    pub fn load(
+        &self,
+        manager: &UnitManager,
+        config: &Config,
+    ) -> Result<Scenario, UnitIncompatibleReason> {
         let (test_order, graph) = self.is_compatible(manager, config)?;
         Ok(Scenario::new(self, test_order, manager, graph))
     }
 
-    pub fn get_test_order(&self,
-                          manager: &UnitManager)
-                          -> Result<(Vec<UnitName>, Dependy<UnitName>), UnitIncompatibleReason> {
-
+    pub fn get_test_order(
+        &self,
+        manager: &UnitManager,
+    ) -> Result<(Vec<UnitName>, Dependy<UnitName>), UnitIncompatibleReason> {
         // Create a new dependency graph
         let mut graph = Dependy::new();
 
@@ -433,7 +423,7 @@ pub struct Scenario {
 
     /// The result of the ExecStart run program (if any).
     exec_start_state: Rc<RefCell<TestState>>,
-    
+
     /// How many tests have failed in this particular run.
     failures: Rc<RefCell<u32>>,
 
@@ -455,18 +445,20 @@ pub struct Scenario {
 }
 
 impl Scenario {
-    fn new(desc: &ScenarioDescription,
-               test_order: Vec<UnitName>,
-               manager: &UnitManager,
-               graph: Dependy<UnitName>)
-               -> Scenario {
-
+    fn new(
+        desc: &ScenarioDescription,
+        test_order: Vec<UnitName>,
+        manager: &UnitManager,
+        graph: Dependy<UnitName>,
+    ) -> Scenario {
         let mut tests = HashMap::new();
         let mut test_sequence = vec![];
         let mut test_state = HashMap::new();
 
         for test_name in test_order {
-            let test = manager.get_test_named(&test_name).expect("Unable to check out requested test from library");
+            let test = manager
+                .get_test_named(&test_name)
+                .expect("Unable to check out requested test from library");
             test_sequence.push(test.clone());
             test_state.insert(test_name.clone(), Rc::new(RefCell::new(TestState::Pending)));
             tests.insert(test_name, test);
@@ -474,14 +466,14 @@ impl Scenario {
 
         Scenario {
             description: desc.clone(),
-            tests: tests,
-            test_sequence: test_sequence,
+            tests,
+            test_sequence,
             test_states: test_state,
             exec_start_state: Rc::new(RefCell::new(TestState::Pending)),
             state: Rc::new(RefCell::new(ScenarioState::Idle)),
             support_wd: Rc::new(RefCell::new(desc.unit_directory.clone())),
             failures: Rc::new(RefCell::new(0)),
-            graph: graph,
+            graph,
             start_time: Instant::now(),
             program: Rc::new(RefCell::new(None)),
         }
@@ -516,7 +508,6 @@ impl Scenario {
         manager: &UnitManager,
         config: &Config,
     ) -> Result<(), UnitActivateError> {
-
         // We'll communicate to the manager through this pipe.
         let ctrl = manager.get_control_channel();
 
@@ -525,24 +516,30 @@ impl Scenario {
         self.start_time = Instant::now();
         *self.state.borrow_mut() = ScenarioState::Idle;
         *self.exec_start_state.borrow_mut() = TestState::Pending;
-        for (_, item) in &self.test_states {
+        self.test_states.iter().for_each(|(_, item)| {
             *item.borrow_mut() = TestState::Pending;
-        }
+        });
 
         // Re-assign our working directory.
-        if let &Some(ref wd) = &self.description.working_directory {
-            config.set_scenario_working_directory(&wd);
-        }
-        else {
+        if let Some(ref wd) = &self.description.working_directory {
+            config.set_scenario_working_directory(wd);
+        } else {
             config.clear_scenario_working_directory();
         }
 
         // Since `config` doesn't get passed around anymore, create a copy of the `working_directory`
         // so that we can run support commands.
-        *self.support_wd.borrow_mut() = config.working_directory(&self.description.unit_directory, &self.description.working_directory);
+        *self.support_wd.borrow_mut() = config.working_directory(
+            &self.description.unit_directory,
+            &self.description.working_directory,
+        );
 
         // Cause the scenario to move to the next (i.e. first) phase.
-        ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::AdvanceScenario(0))).ok();
+        ctrl.send(ManagerControlMessage::new(
+            self.id(),
+            ManagerControlMessageContents::AdvanceScenario(0),
+        ))
+        .ok();
 
         Ok(())
     }
@@ -564,7 +561,12 @@ impl Scenario {
     }
 
     // Given the current state, figure out the next test to run (if any)
-    pub fn advance(&self, last_unit: &UnitName, last_result: i32, ctrl: &Sender<ManagerControlMessage>) {
+    pub fn advance(
+        &self,
+        last_unit: &UnitName,
+        last_result: i32,
+        ctrl: &Sender<ManagerControlMessage>,
+    ) {
         let current_state = self.state.borrow().clone();
 
         // Run the test's stop() command if we just ran a test.
@@ -572,31 +574,49 @@ impl Scenario {
             ScenarioState::Running(step) => {
                 let test_id = self.test_sequence[step].borrow().id().clone();
                 if test_id != *last_unit {
-                    ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::LogError(format!("unit {} is not the expected currently-running unit: {} (step {})", last_unit, test_id, step)))).ok();
+                    ctrl.send(ManagerControlMessage::new(
+                        self.id(),
+                        ManagerControlMessageContents::LogError(format!(
+                            "unit {} is not the expected currently-running unit: {} (step {})",
+                            last_unit, test_id, step
+                        )),
+                    ))
+                    .ok();
                 }
                 let result = match last_result {
                     0 => TestState::Pass,
                     r => {
                         *self.failures.borrow_mut() += 1;
-                        ctrl.send(ManagerControlMessage::new(last_unit, ManagerControlMessageContents::LogError(format!("test failed with nonzero return code: {}", r)))).ok();
+                        ctrl.send(ManagerControlMessage::new(
+                            last_unit,
+                            ManagerControlMessageContents::LogError(format!(
+                                "test failed with nonzero return code: {}",
+                                r
+                            )),
+                        ))
+                        .ok();
                         TestState::Fail(format!("test exited with nonzero return code: {}", r))
-                    },
+                    }
                 };
                 *self.test_states.get(&test_id).unwrap().borrow_mut() = result;
                 /* Run the test's STOP command */
-                if ! self.test_sequence[step].borrow().is_daemon() {
-                    ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::StopTest(test_id))).ok();
+                if !self.test_sequence[step].borrow().is_daemon() {
+                    ctrl.send(ManagerControlMessage::new(
+                        self.id(),
+                        ManagerControlMessageContents::StopTest(test_id),
+                    ))
+                    .ok();
                 }
             }
-            ScenarioState::PreStart => {
-                match last_result {
-                    0 => *self.exec_start_state.borrow_mut() = TestState::Pass,
-                    r => *self.exec_start_state.borrow_mut() = {
+            ScenarioState::PreStart => match last_result {
+                0 => *self.exec_start_state.borrow_mut() = TestState::Pass,
+                r => {
+                    *self.exec_start_state.borrow_mut() = {
                         *self.failures.borrow_mut() += 1;
                         TestState::Fail(format!("test exited with {}", r))
-                    },
+                    }
                 }
-            }
+            },
             _ => (),
         }
 
@@ -610,30 +630,35 @@ impl Scenario {
             ScenarioState::PreStart => {
                 // Unwrap because we've already validated it exists by setting the state to PreStart.
                 let cmd = &self.description.exec_start.clone().unwrap();
-                self.run_support_cmd(cmd,
-                                     ctrl,
-                                     &self.description.exec_start_timeout,
-                                     "execstart");
+                self.run_support_cmd(cmd, ctrl, &self.description.exec_start_timeout, "execstart");
             }
             ScenarioState::Running(next_step) => {
-                let ref test = self.test_sequence[next_step].borrow();
+                let test = &self.test_sequence[next_step].borrow();
                 let test_timeout = test.timeout();
-                let test_max_time = self.make_timeout(test_timeout);
-                ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::StartTest(test.id().clone()))).ok();
+                let _test_max_time = self.make_timeout(test_timeout);
+                ctrl.send(ManagerControlMessage::new(
+                    self.id(),
+                    ManagerControlMessageContents::StartTest(test.id().clone()),
+                ))
+                .ok();
             }
             ScenarioState::PostSuccess => {
                 let cmd = &self.description.exec_stop_success.clone().unwrap();
-                self.run_support_cmd(cmd,
-                                     ctrl,
-                                     &self.description.exec_stop_success_timeout,
-                                     "execstopsuccess");
+                self.run_support_cmd(
+                    cmd,
+                    ctrl,
+                    &self.description.exec_stop_success_timeout,
+                    "execstopsuccess",
+                );
             }
             ScenarioState::PostFailure => {
                 let cmd = &self.description.exec_stop_failure.clone().unwrap();
-                self.run_support_cmd(cmd,
-                                     ctrl,
-                                     &self.description.exec_stop_failure_timeout,
-                                     "execstopfailure");
+                self.run_support_cmd(
+                    cmd,
+                    ctrl,
+                    &self.description.exec_stop_failure_timeout,
+                    "execstopfailure",
+                );
             }
 
             // If we're transitioning to the Finshed state, it means we just finished
@@ -644,8 +669,18 @@ impl Scenario {
 
     /// Run a support command (i.e. ExecStart, ExecStopSuccess, or ExecStopFailure).
     /// Will emit an AdvanceScenario message upon completion.
-    fn run_support_cmd(&self, cmd: &String, ctrl: &Sender<ManagerControlMessage>, timeout: &Option<Duration>, testname: &str) {
-        ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::Log(format!("{}: starting [{}]", testname, cmd)))).ok();
+    fn run_support_cmd(
+        &self,
+        cmd: &str,
+        ctrl: &Sender<ManagerControlMessage>,
+        timeout: &Option<Duration>,
+        testname: &str,
+    ) {
+        ctrl.send(ManagerControlMessage::new(
+            self.id(),
+            ManagerControlMessageContents::Log(format!("{}: starting [{}]", testname, cmd)),
+        ))
+        .ok();
         let mut run_cmd = Runny::new(cmd);
         if let Some(timeout) = *timeout {
             run_cmd.timeout(timeout);
@@ -654,8 +689,19 @@ impl Scenario {
         let mut running = match run_cmd.start() {
             Ok(o) => o,
             Err(e) => {
-                ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::LogError(format!("{}: unable to run command: {:?}", testname, e)))).ok();
-                ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::AdvanceScenario(1))).ok();
+                ctrl.send(ManagerControlMessage::new(
+                    self.id(),
+                    ManagerControlMessageContents::LogError(format!(
+                        "{}: unable to run command: {:?}",
+                        testname, e
+                    )),
+                ))
+                .ok();
+                ctrl.send(ManagerControlMessage::new(
+                    self.id(),
+                    ManagerControlMessageContents::AdvanceScenario(1),
+                ))
+                .ok();
                 return;
             }
         };
@@ -666,26 +712,44 @@ impl Scenario {
         let thr_waiter = running.waiter();
         let thr_control = ctrl.clone();
         let id = self.id().clone();
-        let thr_cmd = cmd.clone();
+        let thr_cmd = cmd.to_owned();
         let thr_testname = testname.to_owned();
         thread::spawn(move || {
             thr_waiter.wait();
-            thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(thr_waiter.result()))).ok();
-            thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::Log(format!("{}: finished [{}]", thr_testname, thr_cmd)))).ok();
+            thr_control
+                .send(ManagerControlMessage::new(
+                    &id,
+                    ManagerControlMessageContents::AdvanceScenario(thr_waiter.result()),
+                ))
+                .ok();
+            thr_control
+                .send(ManagerControlMessage::new(
+                    &id,
+                    ManagerControlMessageContents::Log(format!(
+                        "{}: finished [{}]",
+                        thr_testname, thr_cmd
+                    )),
+                ))
+                .ok();
         });
 
         *self.program.borrow_mut() = Some(running);
     }
 
     fn log_output(&self, control: &Sender<ManagerControlMessage>, process: &mut Running) {
-        
         let stdout = process.take_output();
         let thr_control = control.clone();
         let id = self.id().clone();
         thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 let line = line.expect("Unable to get next line");
-                if let Err(_) = thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::Log(line))) {
+                if thr_control
+                    .send(ManagerControlMessage::new(
+                        &id,
+                        ManagerControlMessageContents::Log(line),
+                    ))
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -697,7 +761,13 @@ impl Scenario {
         thread::spawn(move || {
             for line in BufReader::new(stderr).lines() {
                 let line = line.expect("Unable to get next line");
-                if let Err(_) = thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(line))) {
+                if thr_control
+                    .send(ManagerControlMessage::new(
+                        &id,
+                        ManagerControlMessageContents::LogError(line),
+                    ))
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -709,14 +779,16 @@ impl Scenario {
     /// The state order goes:
     /// Idle -> [PreStart] -> Test(0) -> ... -> Test(n) -> [PostSuccess/Fail] -> Idle
     ///
-    fn find_next_state(&self, current_state: ScenarioState, ctrl: &Sender<ManagerControlMessage>) -> ScenarioState {
-
+    fn find_next_state(
+        &self,
+        current_state: ScenarioState,
+        ctrl: &Sender<ManagerControlMessage>,
+    ) -> ScenarioState {
         let test_count = self.tests.len();
         let failure_count = *self.failures.borrow();
 
         let new_state = match current_state {
             ScenarioState::Idle => {
-
                 //self.broadcast(BroadcastMessageContents::Start(self.id().to_string()));
                 ScenarioState::PreStart
             }
@@ -734,12 +806,10 @@ impl Scenario {
                         } else {
                             ScenarioState::Running(i + 1)
                         }
-                    },
-                    None => {
-                        ScenarioState::Running(i + 1)
                     }
+                    None => ScenarioState::Running(i + 1),
                 }
-            },
+            }
             ScenarioState::Running(i) if (i + 1) >= test_count && failure_count > 0 => {
                 ScenarioState::PostFailure
             }
@@ -747,10 +817,10 @@ impl Scenario {
                 ScenarioState::PostSuccess
             }
             ScenarioState::Running(i) => {
-                panic!("Got into a weird state. Running({}), test_count: {}, failure_count: {}",
-                       i,
-                       test_count,
-                       failure_count)
+                panic!(
+                    "Got into a weird state. Running({}), test_count: {}, failure_count: {}",
+                    i, test_count, failure_count
+                )
             }
             ScenarioState::PostFailure => ScenarioState::ScenarioFinished,
             ScenarioState::PostSuccess => ScenarioState::ScenarioFinished,
@@ -771,8 +841,11 @@ impl Scenario {
     /// Reasons it might not be acceptable might be because there
     /// is no exec_start and the new state is PreStart, or because
     /// the new state is on a test whose requirements are not met.
-    fn is_state_okay(&self, new_state: &ScenarioState, ctrl: &Sender<ManagerControlMessage>) -> bool {
-
+    fn is_state_okay(
+        &self,
+        new_state: &ScenarioState,
+        ctrl: &Sender<ManagerControlMessage>,
+    ) -> bool {
         match *new_state {
             // We can always enter the idle state.
             ScenarioState::Idle => true,
@@ -785,9 +858,7 @@ impl Scenario {
                 let tests = &self.test_sequence;
                 let test = tests[i].borrow();
                 let test_name = test.id();
-                if self.scenario_timed_out() {
-                    false
-                } else if i >= self.tests.len() {
+                if self.scenario_timed_out() || i >= self.tests.len() {
                     false
                 } else if let TestState::Fail(ref _x) = *self.exec_start_state.borrow() {
                     // If the preroll command failed, then abort.
@@ -797,9 +868,16 @@ impl Scenario {
                     false
                 }
                 // Make sure all required dependencies succeeded.
-                else if !self.all_dependencies_succeeded(&test_name) {
+                else if !self.all_dependencies_succeeded(test_name) {
                     *self.test_states.get(test_name).unwrap().borrow_mut() = TestState::Skip;
-                    ctrl.send(ManagerControlMessage::new(self.id(), ManagerControlMessageContents::Skip(test_name.clone(), "dependency failed".to_owned()))).ok();
+                    ctrl.send(ManagerControlMessage::new(
+                        self.id(),
+                        ManagerControlMessageContents::Skip(
+                            test_name.clone(),
+                            "dependency failed".to_owned(),
+                        ),
+                    ))
+                    .ok();
                     false
                 } else {
                     true
@@ -875,18 +953,33 @@ impl Scenario {
         let failures = *self.failures.borrow();
         for test in &self.test_sequence {
             // Stop the test.  This will catch normal tests and daemons.
-            ctrl.send(ManagerControlMessage::new(self.id(),
-                                                ManagerControlMessageContents::StopTest(test.borrow().id().clone()))).ok();
+            ctrl.send(ManagerControlMessage::new(
+                self.id(),
+                ManagerControlMessageContents::StopTest(test.borrow().id().clone()),
+            ))
+            .ok();
         }
         // Also stop the scenario.
-        ctrl.send(ManagerControlMessage::new(self.id(),
-                                            ManagerControlMessageContents::StopTest(self.id().clone()))).ok();
+        ctrl.send(ManagerControlMessage::new(
+            self.id(),
+            ManagerControlMessageContents::StopTest(self.id().clone()),
+        ))
+        .ok();
         if failures > 0 {
-            ctrl.send(ManagerControlMessage::new(self.id(),
-                                                ManagerControlMessageContents::ScenarioFinished(failures + 500, "at least one test failed".to_owned()))).ok();
+            ctrl.send(ManagerControlMessage::new(
+                self.id(),
+                ManagerControlMessageContents::ScenarioFinished(
+                    failures + 500,
+                    "at least one test failed".to_owned(),
+                ),
+            ))
+            .ok();
         } else {
-            ctrl.send(ManagerControlMessage::new(self.id(),
-                                                ManagerControlMessageContents::ScenarioFinished(200, "all tests passed".to_owned()))).ok();
+            ctrl.send(ManagerControlMessage::new(
+                self.id(),
+                ManagerControlMessageContents::ScenarioFinished(200, "all tests passed".to_owned()),
+            ))
+            .ok();
         }
     }
 

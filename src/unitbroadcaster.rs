@@ -4,8 +4,8 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time;
 
-use unitmanager::ManagerControlMessage;
 use unit::{UnitKind, UnitName};
+use unitmanager::ManagerControlMessage;
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub enum UnitStatus {
@@ -64,25 +64,29 @@ pub enum UnitStatus {
 impl fmt::Display for UnitStatus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            &UnitStatus::Added(ref path) => write!(f, "added file {}", path.to_string_lossy()),
-            &UnitStatus::Updated(ref path) => write!(f, "updated file {}", path.to_string_lossy()),
-            &UnitStatus::LoadStarted(ref path) => write!(f, "load started {}", path.to_string_lossy()),
-            &UnitStatus::LoadFailed(ref x) => write!(f, "load failed: {}", x),
-            &UnitStatus::Loaded => write!(f, "loaded"),
-            &UnitStatus::Selected => write!(f, "selected"),
-            &UnitStatus::SelectFailed(ref reason) => write!(f, "select failed: {}", reason),
-            &UnitStatus::Deselected(ref reason) => write!(f, "deselected: {}", reason),
-            &UnitStatus::Active => write!(f, "active"),
-            &UnitStatus::ActivationFailed(ref reason) => write!(f, "activation failed: {}", reason),
-            &UnitStatus::DeactivatedSuccessfully(ref x) => {
+            UnitStatus::Added(ref path) => write!(f, "added file {}", path.to_string_lossy()),
+            UnitStatus::Updated(ref path) => write!(f, "updated file {}", path.to_string_lossy()),
+            UnitStatus::LoadStarted(ref path) => {
+                write!(f, "load started {}", path.to_string_lossy())
+            }
+            UnitStatus::LoadFailed(ref x) => write!(f, "load failed: {}", x),
+            UnitStatus::Loaded => write!(f, "loaded"),
+            UnitStatus::Selected => write!(f, "selected"),
+            UnitStatus::SelectFailed(ref reason) => write!(f, "select failed: {}", reason),
+            UnitStatus::Deselected(ref reason) => write!(f, "deselected: {}", reason),
+            UnitStatus::Active => write!(f, "active"),
+            UnitStatus::ActivationFailed(ref reason) => write!(f, "activation failed: {}", reason),
+            UnitStatus::DeactivatedSuccessfully(ref x) => {
                 write!(f, "deactivated successfully: {}", x)
             }
-            &UnitStatus::DeactivatedUnsuccessfully(ref x) => {
+            UnitStatus::DeactivatedUnsuccessfully(ref x) => {
                 write!(f, "deactivated unsuccessfilly: {}", x)
             }
-            &UnitStatus::UnloadStarted(ref path) => write!(f, "unloading {}", path.to_string_lossy()),
-            &UnitStatus::UpdateStarted(ref path) => write!(f, "updating {}", path.to_string_lossy()),
-            &UnitStatus::Removed(ref path) => write!(f, "removed file {}", path.to_string_lossy()),
+            UnitStatus::UnloadStarted(ref path) => {
+                write!(f, "unloading {}", path.to_string_lossy())
+            }
+            UnitStatus::UpdateStarted(ref path) => write!(f, "updating {}", path.to_string_lossy()),
+            UnitStatus::Removed(ref path) => write!(f, "removed file {}", path.to_string_lossy()),
         }
     }
 }
@@ -101,7 +105,7 @@ impl UnitStatusEvent {
         &self.status
     }
     pub fn kind(&self) -> &UnitKind {
-        &self.name.kind()
+        self.name.kind()
     }
     pub fn new_added(path: &Path) -> Option<UnitStatusEvent> {
         let name = match UnitName::from_path(path) {
@@ -110,7 +114,7 @@ impl UnitStatusEvent {
         };
 
         Some(UnitStatusEvent {
-            name: name,
+            name,
             status: UnitStatus::Added(path.to_owned()),
         })
     }
@@ -121,7 +125,7 @@ impl UnitStatusEvent {
         };
 
         Some(UnitStatusEvent {
-            name: name,
+            name,
             status: UnitStatus::Updated(path.to_owned()),
         })
     }
@@ -132,7 +136,7 @@ impl UnitStatusEvent {
         };
 
         Some(UnitStatusEvent {
-            name: name,
+            name,
             status: UnitStatus::Removed(path.to_owned()),
         })
     }
@@ -158,17 +162,17 @@ impl UnitStatusEvent {
         }
     }
 
-    pub fn new_load_started(name: &UnitName, path: &PathBuf) -> UnitStatusEvent {
+    pub fn new_load_started(name: &UnitName, path: &Path) -> UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
-            status: UnitStatus::LoadStarted(path.clone()),
+            status: UnitStatus::LoadStarted(path.to_owned()),
         }
     }
 
-    pub fn new_update_started(name: &UnitName, path: &PathBuf) -> UnitStatusEvent {
+    pub fn new_update_started(name: &UnitName, path: &Path) -> UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
-            status: UnitStatus::UpdateStarted(path.clone()),
+            status: UnitStatus::UpdateStarted(path.to_owned()),
         }
     }
 
@@ -214,10 +218,10 @@ impl UnitStatusEvent {
         }
     }
 
-    pub fn new_unload_started(name: &UnitName, path: &PathBuf) -> UnitStatusEvent {
+    pub fn new_unload_started(name: &UnitName, path: &Path) -> UnitStatusEvent {
         UnitStatusEvent {
             name: name.clone(),
-            status: UnitStatus::UnloadStarted(path.clone()),
+            status: UnitStatus::UnloadStarted(path.to_owned()),
         }
     }
 }
@@ -231,10 +235,10 @@ pub struct UnitCategoryEvent {
 }
 
 impl UnitCategoryEvent {
-    pub fn new(kind: UnitKind, status: &UnitCategoryStatus) -> Self {
+    pub fn new(kind: UnitKind, status: &str) -> Self {
         UnitCategoryEvent {
-            kind: kind,
-            status: status.clone(),
+            kind,
+            status: status.to_owned(),
         }
     }
     pub fn kind(&self) -> &UnitKind {
@@ -254,8 +258,8 @@ pub enum LogType {
 impl LogType {
     pub fn as_str(&self) -> &str {
         match self {
-            &LogType::Error => "error",
-            &LogType::Info => "info",
+            LogType::Error => "error",
+            LogType::Info => "info",
         }
     }
 }
@@ -367,7 +371,9 @@ pub struct UnitBroadcaster {
 
 impl UnitBroadcaster {
     pub fn new() -> Self {
-        UnitBroadcaster { senders: Arc::new(Mutex::new(vec![])) }
+        UnitBroadcaster {
+            senders: Arc::new(Mutex::new(vec![])),
+        }
     }
 
     fn broadcast_core(senders: &Arc<Mutex<Vec<Sender<UnitEvent>>>>, event: &UnitEvent) {
@@ -376,7 +382,7 @@ impl UnitBroadcaster {
         let mut notify_senders_ref = senders.lock().unwrap();
         {
             for (idx, sender) in notify_senders_ref.iter().enumerate() {
-                if let Err(_) = sender.send(event.clone()) {
+                if sender.send(event.clone()).is_err() {
                     // If an error occurred, that means the receiver has closed
                     // and so we must remove it.
                     to_remove = Some(idx);
@@ -389,9 +395,8 @@ impl UnitBroadcaster {
             notify_senders_ref.remove(idx);
         }
 
-        match *event {
-            UnitEvent::Shutdown => notify_senders_ref.clear(),
-            _ => (),
+        if *event == UnitEvent::Shutdown {
+            notify_senders_ref.clear()
         }
     }
 
@@ -406,6 +411,9 @@ impl UnitBroadcaster {
     }
 
     pub fn log(&self, section: &str, message: String) {
-        self.broadcast(&UnitEvent::Log(LogEntry::new_info(UnitName::internal(section), message)));
+        self.broadcast(&UnitEvent::Log(LogEntry::new_info(
+            UnitName::internal(section),
+            message,
+        )));
     }
 }

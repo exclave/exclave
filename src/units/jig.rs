@@ -1,17 +1,19 @@
 extern crate runny;
 extern crate systemd_parser;
 
-use std::path::{Path, PathBuf};
-use std::io::Read;
 use std::fs::File;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 
 use config::Config;
-use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason,
-           UnitName, UnitSelectError, UnitDeselectError};
+use unit::{
+    UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitDeselectError,
+    UnitIncompatibleReason, UnitName, UnitSelectError,
+};
 use unitmanager::UnitManager;
 
-use self::systemd_parser::items::DirectiveEntry;
 use self::runny::Runny;
+use self::systemd_parser::items::DirectiveEntry;
 
 /// A struct defining an in-memory representation of a .jig file
 #[derive(Clone)]
@@ -51,8 +53,12 @@ impl JigDescription {
         Self::from_string(&contents, unit_name, path)
     }
 
-    pub fn from_string(contents: &str, unit_name: UnitName, path: &Path) -> Result<JigDescription, UnitDescriptionError> {
-        let unit_file = systemd_parser::parse_string(&contents)?;
+    pub fn from_string(
+        contents: &str,
+        unit_name: UnitName,
+        path: &Path,
+    ) -> Result<JigDescription, UnitDescriptionError> {
+        let unit_file = systemd_parser::parse_string(contents)?;
 
         if !unit_file.has_category("Jig") {
             return Err(UnitDescriptionError::MissingSection("Jig".to_owned()));
@@ -70,8 +76,8 @@ impl JigDescription {
         };
 
         for entry in unit_file.lookup_by_category("Jig") {
-            match entry {
-                &DirectiveEntry::Solo(ref directive) => match directive.key() {
+            if let DirectiveEntry::Solo(ref directive) = entry {
+                match directive.key() {
                     "Name" => jig_description.name = directive.value().unwrap_or("").to_owned(),
                     "Description" => {
                         jig_description.description = directive.value().unwrap_or("").to_owned()
@@ -82,10 +88,7 @@ impl JigDescription {
                         }
                     }
                     "TestFile" => {
-                        jig_description.test_file = match directive.value() {
-                            Some(s) => Some(s.to_owned()),
-                            None => None,
-                        }
+                        jig_description.test_file = directive.value().map(|s| s.to_owned())
                     }
                     "DefaultScenario" => {
                         jig_description.default_scenario = match directive.value() {
@@ -94,14 +97,10 @@ impl JigDescription {
                         }
                     }
                     "TestProgram" => {
-                        jig_description.test_program = match directive.value() {
-                            Some(s) => Some(s.to_owned()),
-                            None => None,
-                        }
+                        jig_description.test_program = directive.value().map(|s| s.to_owned())
                     }
                     &_ => (),
-                },
-                &_ => (),
+                }
             }
         }
         Ok(jig_description)
@@ -128,23 +127,24 @@ impl JigDescription {
             use std::io::{BufRead, BufReader};
 
             let running = Runny::new(cmd_str)
-                .directory(&Some(config.working_directory(&self.unit_directory, &self.working_directory).clone()))
-                .timeout(config.timeout().clone())
+                .directory(&Some(
+                    config.working_directory(&self.unit_directory, &self.working_directory),
+                ))
+                .timeout(*config.timeout())
                 .path(config.paths().clone())
                 .start()?;
 
             let mut reader = BufReader::new(running);
             let mut buf = String::new();
             loop {
-                if let Err(_) = reader.read_line(&mut buf) {
+                if reader.read_line(&mut buf).is_err() {
                     break;
                 }
             }
             let result = reader.get_ref().result();
             if result != 0 {
                 return Err(UnitIncompatibleReason::TestProgramReturnedNonzero(
-                    result,
-                    buf,
+                    result, buf,
                 ));
             }
         }

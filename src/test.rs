@@ -11,12 +11,9 @@ use unitbroadcaster::{UnitBroadcaster, UnitEvent, UnitStatus};
 use unitlibrary::UnitLibrary;
 use unitmanager::{ManagerControlMessage, ManagerControlMessageContents};
 
-use units::interface::InterfaceDescription;
 use units::jig::JigDescription;
-use units::logger::LoggerDescription;
 use units::scenario::ScenarioDescription;
 use units::test::TestDescription;
-use units::trigger::TriggerDescription;
 
 struct Exclave {
     broadcaster: UnitBroadcaster,
@@ -52,13 +49,18 @@ fn oneliner_write_sleep_write_exit(
         format!(
             "Powershell -NoProfile \"Write-Output {}; Start-Sleep {}; Write-Output {}; exit {}\"",
             // "cmd /c \"echo {} & timeout /T {} & echo {} & exit {}\"",
-            start, d, stop, retcode
+            start,
+            d,
+            stop,
+            retcode
         )
     } else {
         format!(
             "Powershell -NoProfile \"Write-Output {}; Write-Output {}; exit {}\"",
             // "cmd /c \"echo {} & echo {} & exit {}\"",
-            start, stop, retcode
+            start,
+            stop,
+            retcode
         )
     }
 }
@@ -117,10 +119,10 @@ impl Exclave {
         }
 
         Exclave {
-            broadcaster: broadcaster,
-            library: library,
-            receiver: receiver,
-            control: control,
+            broadcaster,
+            library,
+            receiver,
+            control,
         }
     }
 
@@ -148,7 +150,8 @@ impl Exclave {
                     unit_text,
                     name,
                     &PathBuf::from("test/config"),
-                ).unwrap();
+                )
+                .unwrap();
                 self.library
                     .get_manager()
                     .borrow()
@@ -189,22 +192,16 @@ impl Exclave {
         loop {
             let msg = self.run_once()?;
             println!("Message: {:?}", msg);
-            match msg {
-                UnitEvent::ManagerRequest(ref mrq) => {
-                    let ManagerControlMessage {
-                        sender: ref sender_name,
-                        contents: ref msg,
-                    } = mrq;
-                    match msg {
-                        &ManagerControlMessageContents::ScenarioFinished(code, ref string) => {
-                            println!("Got a Scenario Finished @ {}: {}", code, string);
-                            assert!(sender_name == name);
-                            return Ok(());
-                        }
-                        _ => (),
-                    }
+            if let UnitEvent::ManagerRequest(ref mrq) = msg {
+                let ManagerControlMessage {
+                    sender: ref sender_name,
+                    contents: ref msg,
+                } = mrq;
+                if let ManagerControlMessageContents::ScenarioFinished(code, ref string) = msg {
+                    println!("Got a Scenario Finished @ {}: {}", code, string);
+                    assert!(sender_name == name);
+                    return Ok(());
                 }
-                _ => (),
             }
         }
     }
@@ -217,13 +214,11 @@ fn load_dependency() {
     exclave.add_unit(&UnitName::from_str("generic", "jig").unwrap(), GENERIC_JIG);
     exclave.rescan();
 
-    assert!(
-        exclave
-            .library
-            .get_manager()
-            .borrow()
-            .jig_is_loaded(&UnitName::from_str("generic", "jig").unwrap())
-    );
+    assert!(exclave
+        .library
+        .get_manager()
+        .borrow()
+        .jig_is_loaded(&UnitName::from_str("generic", "jig").unwrap()));
 }
 
 #[test]
@@ -285,20 +280,20 @@ ExecStop={}
                     sender: ref sender_name,
                     contents: ref msg,
                 } = mrq;
-                match msg {
-                    &ManagerControlMessageContents::Log(ref string) => {
-                        if *sender_name == exec_stop && string == "cmd-ending" {
-                            return;
-                        }
+                if let ManagerControlMessageContents::Log(ref string) = msg {
+                    if *sender_name == exec_stop && string == "cmd-ending" {
+                        return;
                     }
-                    _ => (),
                 }
             }
             // If a "STOP" event is received before the command is run, that's a problem.
             UnitEvent::Status(ref s) => {
                 if s.name.kind() == &UnitKind::Scenario {
                     if let UnitStatus::DeactivatedSuccessfully(ref msg) = s.status {
-                        panic!("unit {} deactivated before success script was run (success: {})", s.name, msg);
+                        panic!(
+                            "unit {} deactivated before success script was run (success: {})",
+                            s.name, msg
+                        );
                     }
                 }
             }
@@ -355,20 +350,20 @@ ExecStopFailure={}
                     sender: ref sender_name,
                     contents: ref msg,
                 } = mrq;
-                match msg {
-                    &ManagerControlMessageContents::Log(ref string) => {
-                        if *sender_name == exec_stop && string == "cmd-ending-success" {
-                            return;
-                        }
+                if let ManagerControlMessageContents::Log(ref string) = msg {
+                    if *sender_name == exec_stop && string == "cmd-ending-success" {
+                        return;
                     }
-                    _ => (),
                 }
             }
             // If a "STOP" event is received before the command is run, that's a problem.
             UnitEvent::Status(ref s) => {
                 if s.name.kind() == &UnitKind::Scenario {
                     if let UnitStatus::DeactivatedSuccessfully(ref msg) = s.status {
-                        panic!("unit {} deactivated before success script was run (success: {})", s.name, msg);
+                        panic!(
+                            "unit {} deactivated before success script was run (success: {})",
+                            s.name, msg
+                        );
                     }
                 }
             }
@@ -425,20 +420,20 @@ ExecStopFailure={}
                     sender: ref sender_name,
                     contents: ref msg,
                 } = mrq;
-                match msg {
-                    &ManagerControlMessageContents::Log(ref string) => {
-                        if *sender_name == exec_stop && string == "cmd-ending-failure" {
-                            return;
-                        }
+                if let ManagerControlMessageContents::Log(ref string) = msg {
+                    if *sender_name == exec_stop && string == "cmd-ending-failure" {
+                        return;
                     }
-                    _ => (),
                 }
             }
             // If a "STOP" event is received before the command is run, that's a problem.
             UnitEvent::Status(ref s) => {
                 if s.name.kind() == &UnitKind::Scenario {
                     if let UnitStatus::DeactivatedSuccessfully(ref msg) = s.status {
-                        panic!("unit {} deactivated before failure script was run (success: {})", s.name, msg);
+                        panic!(
+                            "unit {} deactivated before failure script was run (success: {})",
+                            s.name, msg
+                        );
                     }
                 }
             }
@@ -478,7 +473,7 @@ Tests=master
 
     exclave.start_scenario(&scenario_name);
     // Ensure dependent_seen goes `true` before master_seen does.
-    let mut master_seen = false;
+    let mut _master_seen = false;
     let mut dependent_seen = false;
     loop {
         let msg = exclave.run_once().unwrap();
@@ -489,28 +484,28 @@ Tests=master
                     sender: ref sender_name,
                     contents: ref msg,
                 } = mrq;
-                match msg {
-                    &ManagerControlMessageContents::Log(ref string) => {
-                        if *sender_name == dependent_name && string == "end-dependent" {
-                            assert!(master_seen == false);
-                            assert!(dependent_seen == false);
-                            dependent_seen = true;
-                        }
-                        if *sender_name == master_name && string == "begin-master" {
-                            assert!(master_seen == false);
-                            assert!(dependent_seen == true);
-                            master_seen = true;
-                            return;
-                        }
+                if let ManagerControlMessageContents::Log(ref string) = msg {
+                    if *sender_name == dependent_name && string == "end-dependent" {
+                        assert!(!_master_seen);
+                        assert!(!dependent_seen);
+                        dependent_seen = true;
                     }
-                    _ => (),
+                    if *sender_name == master_name && string == "begin-master" {
+                        assert!(!_master_seen);
+                        assert!(dependent_seen);
+                        _master_seen = true;
+                        return;
+                    }
                 }
             }
             // If a "STOP" event is received before the command is run, that's a problem.
             UnitEvent::Status(ref s) => {
                 if s.name.kind() == &UnitKind::Scenario {
                     if let UnitStatus::DeactivatedSuccessfully(ref msg) = s.status {
-                        panic!("unit {} deactivated before strings were found (success: {})", s.name, msg);
+                        panic!(
+                            "unit {} deactivated before strings were found (success: {})",
+                            s.name, msg
+                        );
                     }
                 }
             }

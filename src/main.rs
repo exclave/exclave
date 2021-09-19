@@ -9,6 +9,9 @@ extern crate serde_json;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+mod config;
+mod quiesce;
+mod terminal;
 mod unit;
 mod unitbroadcaster;
 mod unitlibrary;
@@ -16,14 +19,11 @@ mod unitloader;
 mod unitmanager;
 mod units;
 mod unitwatcher;
-mod terminal;
-mod config;
-mod quiesce;
 
 use unitbroadcaster::{UnitBroadcaster, UnitEvent};
-use unitwatcher::UnitWatcher;
-use unitloader::UnitLoader;
 use unitlibrary::UnitLibrary;
+use unitloader::UnitLoader;
+use unitwatcher::UnitWatcher;
 
 use clap::{App, Arg};
 
@@ -41,7 +41,8 @@ fn main() {
     let ctrl_c_broadcaster = unit_broadcaster.clone();
     ctrlc::set_handler(move || {
         ctrl_c_broadcaster.broadcast(&UnitEvent::Shutdown);
-    }).expect("Error setting Ctrl-C handler");
+    })
+    .expect("Error setting Ctrl-C handler");
 
     let matches = App::new("Exclave Testing System")
         .version(env!("CARGO_PKG_VERSION"))
@@ -96,17 +97,21 @@ fn main() {
         None
     };
 
-    terminal::TerminalInterface::start(output_type, &unit_broadcaster, matches.is_present("KEYBOARD_TRIGGER"));
+    terminal::TerminalInterface::start(
+        output_type,
+        &unit_broadcaster,
+        matches.is_present("KEYBOARD_TRIGGER"),
+    );
 
     for config_dir in config_dirs {
         unit_watcher
             .add_path(config_dir)
-            .expect(&format!("Unable to add config directory {}", config_dir));
+            .unwrap_or_else(|_| panic!("Unable to add config directory {}", config_dir));
     }
 
     let mut quiesce = quiesce::Quiesce::new(Duration::from_secs(1), &unit_broadcaster);
 
-    unit_broadcaster.log("main", format!("Exclave initializing"));
+    unit_broadcaster.log("main", "Exclave initializing".to_string());
 
     let mut debug_file = match matches.value_of("DEBUG_LOGFILE") {
         None => None,
@@ -135,13 +140,11 @@ fn main() {
             writeln!(
                 file,
                 "{}:{}.{} {:?}",
-                loops,
-                unix_time,
-                unix_time_nsecs,
-                msg
-            ).expect("Couldn't write message to logfile");
+                loops, unix_time, unix_time_nsecs, msg
+            )
+            .expect("Couldn't write message to logfile");
         }
-        loops = loops + 1;
+        loops += 1;
         unit_loader.process_message(&msg);
         unit_library.process_message(&msg);
         quiesce.process_message(&msg);

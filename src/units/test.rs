@@ -5,28 +5,28 @@ extern crate runny;
 extern crate systemd_parser;
 
 use std::cell::RefCell;
-use std::error::Error;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use self::dependy::Dependency;
 use self::humantime::{parse_duration, DurationError};
 use self::regex::Regex;
-use self::runny::Runny;
 use self::runny::running::{RunningOutput, RunningWaiter};
+use self::runny::Runny;
 use self::systemd_parser::items::DirectiveEntry;
 
 use config::Config;
-use unit::{UnitName, UnitActivateError, UnitDeactivateError, UnitSelectError, UnitDeselectError,
-           UnitIncompatibleReason, UnitDescriptionError};
-use unitmanager::{ManagerControlMessage, ManagerControlMessageContents,
-                  UnitManager};
+use unit::{
+    UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitDeselectError,
+    UnitIncompatibleReason, UnitName, UnitSelectError,
+};
+use unitmanager::{ManagerControlMessage, ManagerControlMessageContents, UnitManager};
 
 #[derive(Debug, PartialEq, Clone)]
 enum TestType {
@@ -104,8 +104,12 @@ impl TestDescription {
         Self::from_string(&contents, unit_name, path)
     }
 
-    pub fn from_string(contents: &str, unit_name: UnitName, path: &Path) -> Result<TestDescription, UnitDescriptionError> {
-        let unit_file = systemd_parser::parse_string(&contents)?;
+    pub fn from_string(
+        contents: &str,
+        unit_name: UnitName,
+        path: &Path,
+    ) -> Result<TestDescription, UnitDescriptionError> {
+        let unit_file = systemd_parser::parse_string(contents)?;
 
         if !unit_file.has_category("Test") {
             return Err(UnitDescriptionError::MissingSection("Test".to_owned()));
@@ -138,113 +142,111 @@ impl TestDescription {
         };
 
         for entry in unit_file.lookup_by_category("Test") {
-            match entry {
-                &DirectiveEntry::Solo(ref directive) => {
-                    match directive.key() {
-                        "Name" => {
-                            test_description.name = directive.value().unwrap_or("").to_owned()
+            if let DirectiveEntry::Solo(directive) = entry {
+                match directive.key() {
+                    "Name" => test_description.name = directive.value().unwrap_or("").to_owned(),
+                    "Description" => {
+                        test_description.description = directive.value().unwrap_or("").to_owned()
+                    }
+                    "Jigs" => {
+                        test_description.jigs = match directive.value() {
+                            Some(s) => UnitName::from_list(s, "jig")?,
+                            None => vec![],
                         }
-                        "Description" => {
-                            test_description.description =
-                                directive.value().unwrap_or("").to_owned()
+                    }
+                    "Provides" => {
+                        test_description.provides = match directive.value() {
+                            Some(s) => UnitName::from_list(s, "test")?,
+                            None => vec![],
                         }
-                        "Jigs" => {
-                            test_description.jigs = match directive.value() {
-                                Some(s) => UnitName::from_list(s, "jig")?,
-                                None => vec![],
-                            }
+                    }
+                    "Requires" => {
+                        test_description.requires = match directive.value() {
+                            Some(s) => UnitName::from_list(s, "test")?,
+                            None => vec![],
                         }
-                        "Provides" => {
-                            test_description.provides = match directive.value() {
-                                Some(s) => UnitName::from_list(s, "test")?,
-                                None => vec![],
-                            }
+                    }
+                    "Suggests" => {
+                        test_description.suggests = match directive.value() {
+                            Some(s) => UnitName::from_list(s, "test")?,
+                            None => vec![],
                         }
-                        "Requires" => {
-                            test_description.requires = match directive.value() {
-                                Some(s) => UnitName::from_list(s, "test")?,
-                                None => vec![],
-                            }
+                    }
+                    "DaemonReadyText" => {
+                        test_description.test_daemon_ready = match directive.value() {
+                            Some(s) => Some(Regex::new(s)?),
+                            None => None,
                         }
-                        "Suggests" => {
-                            test_description.suggests = match directive.value() {
-                                Some(s) => UnitName::from_list(s, "test")?,
-                                None => vec![],
-                            }
-                        }
-                        "DaemonReadyText" => {
-                            test_description.test_daemon_ready = match directive.value() {
-                                Some(s) => Some(Regex::new(s)?),
-                                None => None,
-                            }
-                        }
+                    }
 
-                        "Type" => {
-                            test_description.test_type = match directive.value() {
-                                Some(s) => {
-                                    match s.to_string().to_lowercase().as_ref() {
-                                        "simple" => TestType::Simple,
-                                        "daemon" => TestType::Daemon,
-                                        other => return Err(UnitDescriptionError::InvalidValue(
-                                            "Test".to_owned(),
+                    "Type" => {
+                        test_description.test_type = match directive.value() {
+                            Some(s) => match s.to_string().to_lowercase().as_ref() {
+                                "simple" => TestType::Simple,
+                                "daemon" => TestType::Daemon,
+                                other => {
+                                    return Err(UnitDescriptionError::InvalidValue(
+                                        "Test".to_owned(),
                                         "Type".to_owned(),
                                         other.to_owned(),
-                                        vec!["Simple".to_owned(), "Daemon".to_owned()])),
-                                    }
+                                        vec!["Simple".to_owned(), "Daemon".to_owned()],
+                                    ))
                                 }
-                                None => TestType::Simple,
-                            };
-                        }
-                        "WorkingDirectory" => {
-                            // If a WorkingDirectory was specified, add it to the current directory
-                            // (replaces `working_directory` if the new WD is absolute)
-                            if let Some(wd) = directive.value() {
-                                test_description.working_directory = Some(PathBuf::from(wd));
-                            }
-                        }
-                        "ExecStart" => {
-                            test_description.exec_start = match directive.value() {
-                                None => return Err(UnitDescriptionError::MissingValue("Test".to_owned(), "ExecStart".to_owned())),
-                                Some(s) => s.to_owned(),
-                            }
-                        }
-                        "Timeout" => {
-                            test_description.timeout = match directive.value() {
-                                None => None,
-                                Some(s) => Some(Self::parse_time(s)?),
-                            }
-                        }
-                        "ExecStopSuccess" => {
-                            test_description.exec_stop_success = match directive.value() {
-                                None => None,
-                                Some(s) => Some(s.to_owned()),
-                            }
-                        }
-                        "ExecStopSuccessTimeout" => {
-                            test_description.exec_stop_success_timeout = match directive.value() {
-                                None => None,
-                                Some(s) => Some(Self::parse_time(s)?),
-                            }
-                        }
-                        "ExecStopFailure" => {
-                            test_description.exec_stop_failure = match directive.value() {
-                                None => None,
-                                Some(s) => Some(s.to_owned()),
-                            }
-                        }
-                        "ExecStopFailureTimeout" => {
-                            test_description.exec_stop_failure_timeout = match directive.value() {
-                                None => None,
-                                Some(s) => Some(Self::parse_time(s)?),
-                            }
-                        }                        &_ => (),
+                            },
+                            None => TestType::Simple,
+                        };
                     }
+                    "WorkingDirectory" => {
+                        // If a WorkingDirectory was specified, add it to the current directory
+                        // (replaces `working_directory` if the new WD is absolute)
+                        if let Some(wd) = directive.value() {
+                            test_description.working_directory = Some(PathBuf::from(wd));
+                        }
+                    }
+                    "ExecStart" => {
+                        test_description.exec_start = match directive.value() {
+                            None => {
+                                return Err(UnitDescriptionError::MissingValue(
+                                    "Test".to_owned(),
+                                    "ExecStart".to_owned(),
+                                ))
+                            }
+                            Some(s) => s.to_owned(),
+                        }
+                    }
+                    "Timeout" => {
+                        test_description.timeout = match directive.value() {
+                            None => None,
+                            Some(s) => Some(Self::parse_time(s)?),
+                        }
+                    }
+                    "ExecStopSuccess" => {
+                        test_description.exec_stop_success = directive.value().map(|s| s.to_owned())
+                    }
+                    "ExecStopSuccessTimeout" => {
+                        test_description.exec_stop_success_timeout = match directive.value() {
+                            None => None,
+                            Some(s) => Some(Self::parse_time(s)?),
+                        }
+                    }
+                    "ExecStopFailure" => {
+                        test_description.exec_stop_failure = directive.value().map(|s| s.to_owned())
+                    }
+                    "ExecStopFailureTimeout" => {
+                        test_description.exec_stop_failure_timeout = match directive.value() {
+                            None => None,
+                            Some(s) => Some(Self::parse_time(s)?),
+                        }
+                    }
+                    &_ => (),
                 }
-                &_ => (),
             }
         }
-        if test_description.exec_start == "" {
-            return Err(UnitDescriptionError::MissingValue("Test".to_owned(), "ExecStart".to_owned()));
+        if test_description.exec_start.is_empty() {
+            return Err(UnitDescriptionError::MissingValue(
+                "Test".to_owned(),
+                "ExecStart".to_owned(),
+            ));
         }
         Ok(test_description)
     }
@@ -266,9 +268,11 @@ impl TestDescription {
         self.jigs.contains(name)
     }
 
-    pub fn load(&self, 
+    pub fn load(
+        &self,
         _manager: &UnitManager,
-        _config: &Config) -> Result<Test, UnitIncompatibleReason> {
+        _config: &Config,
+    ) -> Result<Test, UnitIncompatibleReason> {
         Ok(Test::new(self))
     }
 }
@@ -287,21 +291,21 @@ impl Test {
             program: Rc::new(RefCell::new(None)),
             result_arc: Arc::new(Mutex::new(None)),
             last_line: Arc::new(Mutex::new("".to_owned())),
-         }
+        }
     }
 
     pub fn select(&self, manager: &UnitManager) -> Result<(), UnitSelectError> {
         // If there is at least one jig in the description list, then make sure
         // that jig is loaded.
-        if self.description.jigs.len() > 0 {
+        if !self.description.jigs.is_empty() {
             let mut compatible = false;
             for jig_name in &self.description.jigs {
-                if manager.jig_is_loaded(&jig_name) {
+                if manager.jig_is_loaded(jig_name) {
                     compatible = true;
                     break;
                 }
             }
-            if ! compatible {
+            if !compatible {
                 return Err(UnitSelectError::NoCompatibleJig);
             }
         }
@@ -315,16 +319,24 @@ impl Test {
 
     /// Send the "test finished" message and update the local result value.
     /// This ensures that we only send the "Finished" result once.
-    pub fn send_finished_once(id: &UnitName,
-                              ctrl: &Sender<ManagerControlMessage>,
-                              result_val: i32,
-                              result_arc: &Arc<Mutex<Option<i32>>>,
-                              last_line: &Arc<Mutex<String>>) {
-
+    pub fn send_finished_once(
+        id: &UnitName,
+        ctrl: &Sender<ManagerControlMessage>,
+        result_val: i32,
+        result_arc: &Arc<Mutex<Option<i32>>>,
+        last_line: &Arc<Mutex<String>>,
+    ) {
         let mut result = result_arc.lock().unwrap();
 
         if result.is_none() {
-            ctrl.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(result_val, last_line.lock().unwrap().clone()))).ok();
+            ctrl.send(ManagerControlMessage::new(
+                id,
+                ManagerControlMessageContents::TestFinished(
+                    result_val,
+                    last_line.lock().unwrap().clone(),
+                ),
+            ))
+            .ok();
             *result = Some(result_val);
         }
     }
@@ -334,7 +346,6 @@ impl Test {
         manager: &UnitManager,
         config: &Config,
     ) -> Result<(), UnitActivateError> {
-
         // We'll communicate to the manager through this pipe.
         let ctrl = manager.get_control_channel();
         let id = self.id().clone();
@@ -342,7 +353,11 @@ impl Test {
         *self.result_arc.lock().unwrap() = None;
 
         // Announce to the world that we've started considering this test.
-        ctrl.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestStarted)).ok();
+        ctrl.send(ManagerControlMessage::new(
+            &id,
+            ManagerControlMessageContents::TestStarted,
+        ))
+        .ok();
 
         let cmd = &self.description.exec_start;
         let timeout = &self.description.timeout;
@@ -351,13 +366,34 @@ impl Test {
         if let Some(timeout) = *timeout {
             cmd.timeout(timeout);
         }
-        cmd.directory(&Some(config.working_directory(&self.description.unit_directory, &self.description.working_directory)));
+        cmd.directory(&Some(config.working_directory(
+            &self.description.unit_directory,
+            &self.description.working_directory,
+        )));
         let mut running = match cmd.start() {
             Ok(r) => r,
             Err(e) => {
-                ctrl.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(format!("unable to start test: {:?}", e)))).unwrap();
-                ctrl.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(-3, format!("unable to start test: {:?}", e)))).ok();
-                ctrl.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(-3))).ok();
+                ctrl.send(ManagerControlMessage::new(
+                    &id,
+                    ManagerControlMessageContents::LogError(format!(
+                        "unable to start test: {:?}",
+                        e
+                    )),
+                ))
+                .unwrap();
+                ctrl.send(ManagerControlMessage::new(
+                    &id,
+                    ManagerControlMessageContents::TestFinished(
+                        -3,
+                        format!("unable to start test: {:?}", e),
+                    ),
+                ))
+                .ok();
+                ctrl.send(ManagerControlMessage::new(
+                    &id,
+                    ManagerControlMessageContents::AdvanceScenario(-3),
+                ))
+                .ok();
                 return Err(UnitActivateError::ExecFailed(e));
             }
         };
@@ -377,21 +413,45 @@ impl Test {
                     Self::log_error(&id, &ctrl, running.take_error(), &last_line);
                     let buf_reader = BufReader::new(running.take_output());
                     let buf_lines = buf_reader.lines();
-                    let mut buf_iter = buf_lines.into_iter();
+                    let mut buf_iter = buf_lines;
                     if let Some(ref r) = daemon_ready_string {
                         let mut found = false;
-                        while let Some(line_result) = buf_iter.next() {
+                        for line_result in &mut buf_iter {
                             match line_result {
                                 Err(e) => {
-                                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(format!("test daemon raised an error: {}", e.description())))).unwrap();
-                                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(-2))).ok();
+                                    thr_control
+                                        .send(ManagerControlMessage::new(
+                                            &id,
+                                            ManagerControlMessageContents::LogError(format!(
+                                                "test daemon raised an error: {}",
+                                                e
+                                            )),
+                                        ))
+                                        .unwrap();
+                                    thr_control
+                                        .send(ManagerControlMessage::new(
+                                            &id,
+                                            ManagerControlMessageContents::AdvanceScenario(-2),
+                                        ))
+                                        .ok();
                                     running.terminate(Some(Duration::from_secs(1))).ok();
                                     // thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(-2, thr_last_line.lock().unwrap().clone()))).ok();
-                                    Self::send_finished_once(&id, &thr_control, -2, &thr_result_arc, &thr_last_line);
+                                    Self::send_finished_once(
+                                        &id,
+                                        &thr_control,
+                                        -2,
+                                        &thr_result_arc,
+                                        &thr_last_line,
+                                    );
                                     return;
                                 }
                                 Ok(line) => {
-                                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::Log(line.clone()))).unwrap();
+                                    thr_control
+                                        .send(ManagerControlMessage::new(
+                                            &id,
+                                            ManagerControlMessageContents::Log(line.clone()),
+                                        ))
+                                        .unwrap();
                                     if r.is_match(&line) {
                                         found = true;
                                         break;
@@ -400,11 +460,30 @@ impl Test {
                             }
                         }
                         if !found {
-                            thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(format!("test daemon exited before ready string was found")))).unwrap();
-                            thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(-1))).ok();
+                            thr_control
+                                .send(ManagerControlMessage::new(
+                                    &id,
+                                    ManagerControlMessageContents::LogError(
+                                        "test daemon exited before ready string was found"
+                                            .to_string(),
+                                    ),
+                                ))
+                                .unwrap();
+                            thr_control
+                                .send(ManagerControlMessage::new(
+                                    &id,
+                                    ManagerControlMessageContents::AdvanceScenario(-1),
+                                ))
+                                .ok();
                             running.terminate(Some(Duration::from_secs(1))).ok();
-                            Self::send_finished_once(&id, &thr_control, -1, &thr_result_arc, &thr_last_line);
-//                            thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(-1, thr_last_line.lock().unwrap().clone()))).ok();
+                            Self::send_finished_once(
+                                &id,
+                                &thr_control,
+                                -1,
+                                &thr_result_arc,
+                                &thr_last_line,
+                            );
+                            //                            thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::TestFinished(-1, thr_last_line.lock().unwrap().clone()))).ok();
                             return;
                         }
                     }
@@ -416,27 +495,54 @@ impl Test {
                         for line in buf_iter {
                             let line = line.expect("Unable to get next line");
                             *thr_thr_last_line.lock().unwrap() = line.clone();
-                            if let Err(_) = thr_thr_control.send(ManagerControlMessage::new(&thr_id, ManagerControlMessageContents::Log(line))) {
+                            if thr_thr_control
+                                .send(ManagerControlMessage::new(
+                                    &thr_id,
+                                    ManagerControlMessageContents::Log(line),
+                                ))
+                                .is_err()
+                            {
                                 break;
                             }
                         }
                     });
 
                     // Advance to the next test while this one hangs out.
-                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(0))).ok();
+                    thr_control
+                        .send(ManagerControlMessage::new(
+                            &id,
+                            ManagerControlMessageContents::AdvanceScenario(0),
+                        ))
+                        .ok();
                     running.wait().ok();
-                    Self::send_finished_once(&id, &thr_control, running.result(), &thr_result_arc, &thr_last_line);
+                    Self::send_finished_once(
+                        &id,
+                        &thr_control,
+                        running.result(),
+                        &thr_result_arc,
+                        &thr_last_line,
+                    );
                 });
-            },
+            }
             TestType::Simple => {
-
                 // Keep a waiter around in a separate thread to send that AdvanceScenario message upon completion.
                 Self::log_output(&id, &ctrl, running.take_output(), &last_line);
                 Self::log_error(&id, &ctrl, running.take_error(), &last_line);
                 thread::spawn(move || {
                     running.wait().ok();
-                    Self::send_finished_once(&id, &thr_control, running.result(), &thr_result_arc, &thr_last_line);
-                    thr_control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::AdvanceScenario(running.result()))).ok();
+                    Self::send_finished_once(
+                        &id,
+                        &thr_control,
+                        running.result(),
+                        &thr_result_arc,
+                        &thr_last_line,
+                    );
+                    thr_control
+                        .send(ManagerControlMessage::new(
+                            &id,
+                            ManagerControlMessageContents::AdvanceScenario(running.result()),
+                        ))
+                        .ok();
                 });
             }
         }
@@ -450,7 +556,13 @@ impl Test {
             // For Daemons, if they haven't failed so far, then they might fail when we tell them
             // to quit.  Since they've fulfilled their purpose, issue a "pass" message.
             if self.description.test_type == TestType::Daemon {
-                Self::send_finished_once(&self.description.id, &manager.get_control_channel(), 0, &self.result_arc, &self.last_line);
+                Self::send_finished_once(
+                    &self.description.id,
+                    &manager.get_control_channel(),
+                    0,
+                    &self.result_arc,
+                    &self.last_line,
+                );
             }
             running.terminate(&None);
         }
@@ -479,7 +591,12 @@ impl Test {
         &self.description.timeout
     }
 
-    fn log_output(id: &UnitName, control: &Sender<ManagerControlMessage>, stdout: RunningOutput, last_line: &Arc<Mutex<String>>) {
+    fn log_output(
+        id: &UnitName,
+        control: &Sender<ManagerControlMessage>,
+        stdout: RunningOutput,
+        last_line: &Arc<Mutex<String>>,
+    ) {
         let thr_control = control.clone();
         let thr_last_line = last_line.clone();
         let thr_id = id.clone();
@@ -487,14 +604,25 @@ impl Test {
             for line in BufReader::new(stdout).lines() {
                 let line = line.expect("Unable to get next line");
                 *thr_last_line.lock().unwrap() = line.clone();
-                if let Err(_) = thr_control.send(ManagerControlMessage::new(&thr_id, ManagerControlMessageContents::Log(line))) {
+                if thr_control
+                    .send(ManagerControlMessage::new(
+                        &thr_id,
+                        ManagerControlMessageContents::Log(line),
+                    ))
+                    .is_err()
+                {
                     break;
                 }
             }
         });
     }
 
-    fn log_error(id: &UnitName, control: &Sender<ManagerControlMessage>, stderr: RunningOutput, last_line: &Arc<Mutex<String>>) {
+    fn log_error(
+        id: &UnitName,
+        control: &Sender<ManagerControlMessage>,
+        stderr: RunningOutput,
+        last_line: &Arc<Mutex<String>>,
+    ) {
         let thr_control = control.clone();
         let thr_last_line = last_line.clone();
         let thr_id = id.clone();
@@ -502,7 +630,13 @@ impl Test {
             for line in BufReader::new(stderr).lines() {
                 let line = line.expect("Unable to get next line");
                 *thr_last_line.lock().unwrap() = line.clone();
-                if let Err(_) = thr_control.send(ManagerControlMessage::new(&thr_id, ManagerControlMessageContents::LogError(line))) {
+                if thr_control
+                    .send(ManagerControlMessage::new(
+                        &thr_id,
+                        ManagerControlMessageContents::LogError(line),
+                    ))
+                    .is_err()
+                {
                     break;
                 }
             }

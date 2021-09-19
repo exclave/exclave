@@ -25,7 +25,7 @@ use self::systemd_parser::items::DirectiveEntry;
 #[derive(Clone, Copy)]
 enum InterfaceFormat {
     Text,
-    JSON,
+    Json,
 }
 
 /// A struct defining an in-memory representation of a .Interface file
@@ -81,8 +81,8 @@ impl InterfaceDescription {
         };
 
         for entry in unit_file.lookup_by_category("Interface") {
-            match entry {
-                &DirectiveEntry::Solo(ref directive) => match directive.key() {
+            if let DirectiveEntry::Solo(ref directive) = entry {
+                match directive.key() {
                     "Name" => {
                         interface_description.name = directive.value().unwrap_or("").to_owned()
                     }
@@ -100,9 +100,7 @@ impl InterfaceDescription {
                         // If a WorkingDirectory was specified, add it to the current directory
                         // (replaces `working_directory` if the new WD is absolute)
                         if let Some(wd) = directive.value() {
-                            interface_description
-                                .working_directory
-                                = Some(PathBuf::from(wd));
+                            interface_description.working_directory = Some(PathBuf::from(wd));
                         }
                     }
                     "ExecStart" => {
@@ -121,7 +119,7 @@ impl InterfaceDescription {
                             None => InterfaceFormat::Text,
                             Some(s) => match s.to_string().to_lowercase().as_ref() {
                                 "text" => InterfaceFormat::Text,
-                                "json" => InterfaceFormat::JSON,
+                                "json" => InterfaceFormat::Json,
                                 other => {
                                     return Err(UnitDescriptionError::InvalidValue(
                                         "Interface".to_owned(),
@@ -134,8 +132,7 @@ impl InterfaceDescription {
                         }
                     }
                     &_ => (),
-                },
-                &_ => (),
+                }
             }
         }
         Ok(interface_description)
@@ -152,11 +149,11 @@ impl InterfaceDescription {
         manager: &UnitManager,
         _: &Config,
     ) -> Result<(), UnitIncompatibleReason> {
-        if self.jigs.len() == 0 {
+        if self.jigs.is_empty() {
             return Ok(());
         }
         for jig_name in &self.jigs {
-            if manager.jig_is_loaded(&jig_name) {
+            if manager.jig_is_loaded(jig_name) {
                 return Ok(());
             }
         }
@@ -189,7 +186,7 @@ impl Interface {
         Interface {
             desc: desc.clone(),
             process: RefCell::new(None),
-            terminate_timeout: config.terminate_timeout().clone(),
+            terminate_timeout: *config.terminate_timeout(),
         }
     }
 
@@ -211,7 +208,10 @@ impl Interface {
         config: &Config,
     ) -> Result<(), UnitActivateError> {
         let mut running = Runny::new(&self.desc.exec_start)
-            .directory(&Some(config.working_directory(&self.desc.unit_directory, &self.desc.working_directory)))
+            .directory(&Some(config.working_directory(
+                &self.desc.unit_directory,
+                &self.desc.working_directory,
+            )))
             .start()?;
 
         let stdout = running.take_output();
@@ -219,20 +219,15 @@ impl Interface {
 
         let control_sender = manager.get_control_channel();
         let control_sender_id = self.id().clone();
-        match self.desc.format {
-            InterfaceFormat::Text => {
-                // Pass control to an out-of-object thread, and shuttle communications
-                // from stdout onto the control_sender channel.
-                let thr_sender_id = control_sender_id.clone();
-                let thr_sender = control_sender.clone();
-                thread::spawn(move || Self::text_read(thr_sender_id, thr_sender, stdout));
-                let thr_sender_id = control_sender_id.clone();
-                let thr_sender = control_sender.clone();
-                thread::spawn(move || Self::text_read_stderr(thr_sender_id, thr_sender, stderr));
-            }
-            InterfaceFormat::JSON => {
-                ();
-            }
+        if let InterfaceFormat::Text = self.desc.format {
+            // Pass control to an out-of-object thread, and shuttle communications
+            // from stdout onto the control_sender channel.
+            let thr_sender_id = control_sender_id.clone();
+            let thr_sender = control_sender.clone();
+            thread::spawn(move || Self::text_read(thr_sender_id, thr_sender, stdout));
+            let thr_sender_id = control_sender_id.clone();
+            let thr_sender = control_sender.clone();
+            thread::spawn(move || Self::text_read_stderr(thr_sender_id, thr_sender, stderr));
         };
 
         *self.process.borrow_mut() = Some(running);
@@ -242,7 +237,8 @@ impl Interface {
             .send(ManagerControlMessage::new(
                 &control_sender_id,
                 ManagerControlMessageContents::InitialGreeting,
-            )).ok();
+            ))
+            .ok();
 
         Ok(())
     }
@@ -265,7 +261,7 @@ impl Interface {
     pub fn output_message(&self, msg: ManagerStatusMessage) -> Result<(), Error> {
         match self.desc.format {
             InterfaceFormat::Text => self.text_write(msg),
-            InterfaceFormat::JSON => self.json_write(msg),
+            InterfaceFormat::Json => self.json_write(msg),
         }
     }
 
@@ -273,7 +269,7 @@ impl Interface {
         unimplemented!();
     }
 
-    fn cfti_escape(msg: &String) -> String {
+    fn cfti_escape(msg: &str) -> String {
         msg.replace("\\", "\\\\")
             .replace("\t", "\\t")
             .replace("\n", "\\n")
@@ -300,14 +296,14 @@ impl Interface {
                 None => writeln!(process, "JIG"),
             },
             ManagerStatusMessage::Hello(id) => {
-                writeln!(process, "HELLO {}", Self::cfti_escape(&format!("{}", id)))
+                writeln!(process, "HELLO {}", Self::cfti_escape(&id))
             }
             ManagerStatusMessage::Tests(scenario, tests) => {
                 write!(process, "TESTS {}", Self::cfti_escape(scenario.id()))?;
                 for test in &tests {
                     write!(process, " {}", Self::cfti_escape(test.id()))?;
                 }
-                writeln!(process, "")
+                writeln!(process)
             }
             ManagerStatusMessage::Scenario(name) => match name {
                 Some(s) => writeln!(process, "SCENARIO {}", Self::cfti_escape(s.id())),
@@ -318,7 +314,7 @@ impl Interface {
                 for scenario_name in list {
                     write!(process, " {}", Self::cfti_escape(scenario_name.id()))?;
                 }
-                writeln!(process, "")
+                writeln!(process)
             }
             ManagerStatusMessage::Describe(id, field, value) => writeln!(
                 process,
@@ -366,14 +362,14 @@ impl Interface {
             ManagerStatusMessage::Start(scenario) => {
                 writeln!(process, "START {}", Self::cfti_escape(scenario.id()))
             } /*
-            //            BroadcastMessageContents::Hello(name) => writeln!(stdin,
-            //                                                "HELLO {}", name),
-            //            BroadcastMessageContents::Ping(val) => writeln!(stdin,
-            //                                                "PING {}", val),
-            BroadcastMessageContents::Shutdown(reason) => writeln!(stdin, "EXIT {}", reason),
+              //            BroadcastMessageContents::Hello(name) => writeln!(stdin,
+              //                                                "HELLO {}", name),
+              //            BroadcastMessageContents::Ping(val) => writeln!(stdin,
+              //                                                "PING {}", val),
+              BroadcastMessageContents::Shutdown(reason) => writeln!(stdin, "EXIT {}", reason),
 
-            BroadcastMessageContents::Start(scenario) => writeln!(stdin, "START {}", scenario),
-            */
+              BroadcastMessageContents::Start(scenario) => writeln!(stdin, "START {}", scenario),
+              */
         }
     }
 
@@ -383,12 +379,14 @@ impl Interface {
 
         for c in msg.chars() {
             was_bs = match c {
-                '\\' => if was_bs {
-                    out.push('\\');
-                    false
-                } else {
-                    true
-                },
+                '\\' => {
+                    if was_bs {
+                        out.push('\\');
+                        false
+                    } else {
+                        true
+                    }
+                }
                 't' => {
                     out.push(if was_bs { '\t' } else { 't' });
                     false
@@ -418,10 +416,13 @@ impl Interface {
         for line in BufReader::new(output).lines() {
             let line = line.expect("Unable to get next line");
             // If the send fails, that means the other end has closed the pipe.
-            if let Err(_) = control.send(ManagerControlMessage::new(
-                &id,
-                ManagerControlMessageContents::LogError(line),
-            )) {
+            if control
+                .send(ManagerControlMessage::new(
+                    &id,
+                    ManagerControlMessageContents::LogError(line),
+                ))
+                .is_err()
+            {
                 break;
             }
         }
@@ -436,7 +437,7 @@ impl Interface {
                 .collect();
 
             // Don't crash if we get a blank line.
-            if words.len() == 0 {
+            if words.is_empty() {
                 continue;
             }
 
@@ -512,7 +513,10 @@ impl Interface {
             };
 
             // If the send fails, that means the other end has closed the pipe.
-            if let Err(_) = control.send(ManagerControlMessage::new(&id, response)) {
+            if control
+                .send(ManagerControlMessage::new(&id, response))
+                .is_err()
+            {
                 break;
             }
         }
@@ -520,6 +524,7 @@ impl Interface {
             .send(ManagerControlMessage::new(
                 &id,
                 ManagerControlMessageContents::ChildExited,
-            )).expect("interface couldn't send exit message to controller");
+            ))
+            .expect("interface couldn't send exit message to controller");
     }
 }

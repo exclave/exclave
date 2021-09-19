@@ -22,7 +22,10 @@ impl Quiesce {
         }
     }
     pub fn process_message(&mut self, evt: &UnitEvent) {
-        if evt == &UnitEvent::RescanRequest || evt == &UnitEvent::RescanStart || evt == &UnitEvent::RescanFinish {
+        if evt == &UnitEvent::RescanRequest
+            || evt == &UnitEvent::RescanStart
+            || evt == &UnitEvent::RescanFinish
+        {
             return;
         }
         self.restart_timer(UnitEvent::RescanRequest);
@@ -34,5 +37,4 @@ impl Quiesce {
         }
         self.timer_id = Some(self.timer.schedule(event));
     }
-
 }

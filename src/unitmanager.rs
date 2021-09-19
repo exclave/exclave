@@ -9,8 +9,11 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use config::Config;
-use unit::{UnitName, UnitKind, UnitActivateError, UnitDeactivateError, UnitSelectError, UnitDeselectError, UnitIncompatibleReason};
-use unitbroadcaster::{UnitBroadcaster, UnitEvent, UnitStatusEvent, UnitStatus, LogEntry};
+use unit::{
+    UnitActivateError, UnitDeactivateError, UnitDeselectError, UnitIncompatibleReason, UnitKind,
+    UnitName, UnitSelectError,
+};
+use unitbroadcaster::{LogEntry, UnitBroadcaster, UnitEvent, UnitStatus, UnitStatusEvent};
 use units::interface::{Interface, InterfaceDescription};
 use units::jig::{Jig, JigDescription};
 use units::logger::{Logger, LoggerDescription};
@@ -19,36 +22,35 @@ use units::test::{Test, TestDescription};
 use units::trigger::{Trigger, TriggerDescription};
 
 macro_rules! load {
-    ($slf:ident, $dest:ident, $desc:ident) => {
-        {
-            // If the item exists in the array already, then it is active and will be deselected first.
-            if $slf.$dest.borrow().contains_key($desc.id()) {
-                // Deselect the old one it before unloading
-                $slf.deselect($desc.id(), "reloading");
-            };
-            // "Load" the Unit, which means we can select or activate it later on.
-            match $desc.load($slf, &*$slf.cfg.lock().unwrap()) {
-                Ok(o) => {
-                    $slf.$dest.borrow_mut().insert($desc.id().clone(), Rc::new(RefCell::new(o)));
+    ($slf:ident, $dest:ident, $desc:ident) => {{
+        // If the item exists in the array already, then it is active and will be deselected first.
+        if $slf.$dest.borrow().contains_key($desc.id()) {
+            // Deselect the old one it before unloading
+            $slf.deselect($desc.id(), "reloading");
+        };
+        // "Load" the Unit, which means we can select or activate it later on.
+        match $desc.load($slf, &*$slf.cfg.lock().unwrap()) {
+            Ok(o) => {
+                $slf.$dest
+                    .borrow_mut()
+                    .insert($desc.id().clone(), Rc::new(RefCell::new(o)));
 
-                    // Announce the fact that the unit was loaded successfully.
-                    $slf.bc
-                        .broadcast(&UnitEvent::Status(UnitStatusEvent::new_loaded($desc.id())));
+                // Announce the fact that the unit was loaded successfully.
+                $slf.bc
+                    .broadcast(&UnitEvent::Status(UnitStatusEvent::new_loaded($desc.id())));
 
-                    Ok($desc.id().clone())
-                }
-                Err(e) => {
-                    $slf.bc.broadcast(
-                        &UnitEvent::Status(UnitStatusEvent::new_load_failed(
-                            $desc.id(),
-                            format!("{}", e),
-                        )),
-                    );
-                    Err(e)
-                }
+                Ok($desc.id().clone())
+            }
+            Err(e) => {
+                $slf.bc
+                    .broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_failed(
+                        $desc.id(),
+                        format!("{}", e),
+                    )));
+                Err(e)
             }
         }
-    }
+    }};
 }
 
 #[derive(Debug, Clone)]
@@ -60,8 +62,8 @@ pub enum FieldType {
 impl fmt::Display for FieldType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            &FieldType::Name => write!(f, "name"),
-            &FieldType::Description => write!(f, "description"),
+            FieldType::Name => write!(f, "name"),
+            FieldType::Description => write!(f, "description"),
         }
     }
 }
@@ -70,7 +72,9 @@ impl fmt::Display for FieldType {
 #[derive(Debug, Clone)]
 pub enum ManagerStatusMessage {
     /// Return the first name of the jig we're running on.
-    Jig(Option<UnitName> /* Name of the jig (if one is selected) */),
+    Jig(
+        Option<UnitName>, /* Name of the jig (if one is selected) */
+    ),
 
     /// Return a list of known scenarios.
     Scenarios(Vec<UnitName>),
@@ -79,7 +83,10 @@ pub enum ManagerStatusMessage {
     Scenario(Option<UnitName>),
 
     /// Return a list of tests in a scenario.
-    Tests(UnitName /* Scenario name */, Vec<UnitName> /* List of tests */),
+    Tests(
+        UnitName,      /* Scenario name */
+        Vec<UnitName>, /* List of tests */
+    ),
 
     /// Greeting identifying the server.
     Hello(String /* Server identification name */),
@@ -100,14 +107,21 @@ pub enum ManagerStatusMessage {
     Pass(UnitName, String /* log message */),
 
     /// Indicates that a test failed for some reason.
-    Fail(UnitName, i32 /* return code */, String /* log message */),
+    Fail(
+        UnitName,
+        i32,    /* return code */
+        String, /* log message */
+    ),
 
     /// Indicates that a test was skipped for some reason.
     Skipped(UnitName, String /* reason */),
 
     /// Sent when a scenario has finished running.
-    Finished(UnitName /* Scenario name */, u32 /* Result code */, String /* Reason for finishing */),
-
+    Finished(
+        UnitName, /* Scenario name */
+        u32,      /* Result code */
+        String,   /* Reason for finishing */
+    ),
 }
 
 /// Messages for Unit -> Library communication
@@ -162,10 +176,16 @@ pub enum ManagerControlMessageContents {
     Skip(UnitName, String /* reason */),
 
     /// Indicates that a scenario has finished, and how many tests passed.
-    ScenarioFinished(u32 /* Finish code */, String /* Informative message */),
+    ScenarioFinished(
+        u32,    /* Finish code */
+        String, /* Informative message */
+    ),
 
     /// Indicates that a test has finished
-    TestFinished(i32 /* Finish code */, String /* The last printed line */),
+    TestFinished(
+        i32,    /* Finish code */
+        String, /* The last printed line */
+    ),
 
     /// Shutdown the entire system
     Shutdown(Option<String>),
@@ -181,7 +201,7 @@ impl ManagerControlMessage {
     pub fn new(id: &UnitName, contents: ManagerControlMessageContents) -> Self {
         ManagerControlMessage {
             sender: id.clone(),
-            contents: contents,
+            contents,
         }
     }
 }
@@ -253,7 +273,10 @@ impl UnitManager {
     }
 
     /// Runs in a separate thread and consolidates control messages
-    fn control_message_monitor(receiver: Receiver<ManagerControlMessage>, broadcaster: UnitBroadcaster) {
+    fn control_message_monitor(
+        receiver: Receiver<ManagerControlMessage>,
+        broadcaster: UnitBroadcaster,
+    ) {
         while let Ok(msg) = receiver.recv() {
             broadcaster.broadcast(&UnitEvent::ManagerRequest(msg));
         }
@@ -263,27 +286,45 @@ impl UnitManager {
         self.control_sender.clone()
     }
 
-    pub fn load_interface(&self, description: &InterfaceDescription) -> Result<UnitName, UnitIncompatibleReason> {
+    pub fn load_interface(
+        &self,
+        description: &InterfaceDescription,
+    ) -> Result<UnitName, UnitIncompatibleReason> {
         load!(self, interfaces, description)
     }
 
-    pub fn load_logger(&self, description: &LoggerDescription) -> Result<UnitName, UnitIncompatibleReason> {
+    pub fn load_logger(
+        &self,
+        description: &LoggerDescription,
+    ) -> Result<UnitName, UnitIncompatibleReason> {
         load!(self, loggers, description)
     }
 
-    pub fn load_test(&self, desceription: &TestDescription) -> Result<UnitName, UnitIncompatibleReason> {
+    pub fn load_test(
+        &self,
+        desceription: &TestDescription,
+    ) -> Result<UnitName, UnitIncompatibleReason> {
         load!(self, tests, desceription)
     }
 
-    pub fn load_jig(&self, desceription: &JigDescription) -> Result<UnitName, UnitIncompatibleReason> {
+    pub fn load_jig(
+        &self,
+        desceription: &JigDescription,
+    ) -> Result<UnitName, UnitIncompatibleReason> {
         load!(self, jigs, desceription)
     }
 
-    pub fn load_scenario(&self, desceription: &ScenarioDescription) -> Result<UnitName, UnitIncompatibleReason> {
+    pub fn load_scenario(
+        &self,
+        desceription: &ScenarioDescription,
+    ) -> Result<UnitName, UnitIncompatibleReason> {
         load!(self, scenarios, desceription)
     }
 
-    pub fn load_trigger(&self, desceription: &TriggerDescription) -> Result<UnitName, UnitIncompatibleReason> {
+    pub fn load_trigger(
+        &self,
+        desceription: &TriggerDescription,
+    ) -> Result<UnitName, UnitIncompatibleReason> {
         load!(self, triggers, desceription)
     }
 
@@ -307,11 +348,15 @@ impl UnitManager {
         match result {
             Ok(_) => {
                 self.selected.borrow_mut().insert(id.clone(), ());
-                self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected(id)));
-            },
-            Err(e) =>
-               self.bc.broadcast(
-                    &UnitEvent::Status(UnitStatusEvent::new_select_failed(id, format!("{}", e)))),
+                self.bc
+                    .broadcast(&UnitEvent::Status(UnitStatusEvent::new_selected(id)));
+            }
+            Err(e) => self
+                .bc
+                .broadcast(&UnitEvent::Status(UnitStatusEvent::new_select_failed(
+                    id,
+                    format!("{}", e),
+                ))),
         }
     }
 
@@ -338,7 +383,7 @@ impl UnitManager {
         if let Some(ref old_id) = deselct_id_opt {
             self.deselect(old_id, "switching to a new scenario");
         }
-        
+
         // Select this scenario.
         new_scenario.borrow_mut().select()?;
         *self.current_scenario.borrow_mut() = Some(new_scenario.clone());
@@ -385,30 +430,30 @@ impl UnitManager {
         Ok(())
     }
 
-    fn select_test(&self, id: &UnitName) -> Result<(), UnitSelectError> { 
+    fn select_test(&self, id: &UnitName) -> Result<(), UnitSelectError> {
         match self.tests.borrow().get(id) {
-            Some(ref s) => s.borrow_mut().select(self),
+            Some(s) => s.borrow_mut().select(self),
             None => Err(UnitSelectError::UnitNotFound),
         }
     }
 
     fn select_interface(&self, id: &UnitName) -> Result<(), UnitSelectError> {
         match self.interfaces.borrow().get(id) {
-            Some(ref s) => s.borrow_mut().select(),
+            Some(s) => s.borrow_mut().select(),
             None => Err(UnitSelectError::UnitNotFound),
         }
     }
 
     fn select_trigger(&self, id: &UnitName) -> Result<(), UnitSelectError> {
         match self.triggers.borrow().get(id) {
-            Some(ref s) => s.borrow_mut().select(),
+            Some(s) => s.borrow_mut().select(),
             None => Err(UnitSelectError::UnitNotFound),
         }
     }
 
     fn select_logger(&self, id: &UnitName) -> Result<(), UnitSelectError> {
         match self.loggers.borrow().get(id) {
-            Some(ref s) => s.borrow_mut().select(),
+            Some(s) => s.borrow_mut().select(),
             None => Err(UnitSelectError::UnitNotFound),
         }
     }
@@ -417,7 +462,7 @@ impl UnitManager {
         self.deactivate(id, "unit is being deselcted");
 
         // Don't deselect a unit that hasn't been selected.
-        if ! self.selected.borrow().contains_key(id) {
+        if !self.selected.borrow().contains_key(id) {
             return;
         }
 
@@ -425,46 +470,50 @@ impl UnitManager {
         // Note that because these are Rcs, they may live on for a little while
         // longer as references in other objects.
         let result = match id.kind() {
-            &UnitKind::Internal => Ok(()),
-            &UnitKind::Interface => self.deselect_interface(id),
-            &UnitKind::Jig => self.deselect_jig(id),
-            &UnitKind::Logger => self.deselect_logger(id),
-            &UnitKind::Scenario => self.deselect_scenario(id),
-            &UnitKind::Test => self.deselect_test(id),
-            &UnitKind::Trigger => self.deselect_trigger(id),
+            UnitKind::Internal => Ok(()),
+            UnitKind::Interface => self.deselect_interface(id),
+            UnitKind::Jig => self.deselect_jig(id),
+            UnitKind::Logger => self.deselect_logger(id),
+            UnitKind::Scenario => self.deselect_scenario(id),
+            UnitKind::Test => self.deselect_test(id),
+            UnitKind::Trigger => self.deselect_trigger(id),
         };
 
         // A not-okay result is fine, it just means we couldn't find the unit.
         if result.is_ok() {
             self.selected.borrow_mut().remove(id);
-            self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_deselected(id, reason.to_owned())));
+            self.bc
+                .broadcast(&UnitEvent::Status(UnitStatusEvent::new_deselected(
+                    id,
+                    reason.to_owned(),
+                )));
         }
     }
 
     fn deselect_test(&self, id: &UnitName) -> Result<(), UnitDeselectError> {
         match self.tests.borrow().get(id) {
-            Some(ref s) => s.borrow_mut().deselect(),
+            Some(s) => s.borrow_mut().deselect(),
             None => Err(UnitDeselectError::UnitNotFound),
         }
     }
 
     fn deselect_interface(&self, id: &UnitName) -> Result<(), UnitDeselectError> {
         match self.interfaces.borrow().get(id) {
-            Some(ref s) => s.borrow_mut().deselect(),
+            Some(s) => s.borrow_mut().deselect(),
             None => Err(UnitDeselectError::UnitNotFound),
         }
     }
 
     fn deselect_trigger(&self, id: &UnitName) -> Result<(), UnitDeselectError> {
         match self.triggers.borrow().get(id) {
-            Some(ref s) => s.borrow_mut().deselect(),
+            Some(s) => s.borrow_mut().deselect(),
             None => Err(UnitDeselectError::UnitNotFound),
         }
     }
 
     fn deselect_logger(&self, id: &UnitName) -> Result<(), UnitDeselectError> {
         match self.loggers.borrow().get(id) {
-            Some(ref s) => s.borrow_mut().deselect(),
+            Some(s) => s.borrow_mut().deselect(),
             None => Err(UnitDeselectError::UnitNotFound),
         }
     }
@@ -527,7 +576,7 @@ impl UnitManager {
         }
 
         // If the unit still hasn't been selected, don't activate it.
-        if ! self.selected.borrow().contains_key(id) {
+        if !self.selected.borrow().contains_key(id) {
             return;
         }
 
@@ -545,11 +594,15 @@ impl UnitManager {
         match result {
             Ok(_) => {
                 self.active.borrow_mut().insert(id.clone(), ());
-                self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(id)))
-            },
-            Err(e) =>
-               self.bc.broadcast(
-                    &UnitEvent::Status(UnitStatusEvent::new_active_failed(id, format!("unable to activate: {}", e)))),
+                self.bc
+                    .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active(id)))
+            }
+            Err(e) => self
+                .bc
+                .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active_failed(
+                    id,
+                    format!("unable to activate: {}", e),
+                ))),
         }
     }
 
@@ -574,7 +627,7 @@ impl UnitManager {
         // Activate the interface, which actually starts it up.
         match self.interfaces.borrow().get(id) {
             Some(i) => i.borrow_mut().activate(self, &*self.cfg.lock().unwrap()),
-            None => return Err(UnitActivateError::UnitNotFound),
+            None => Err(UnitActivateError::UnitNotFound),
         }
     }
 
@@ -582,7 +635,7 @@ impl UnitManager {
         // Activate the interface, which actually starts it up.
         match self.triggers.borrow().get(id) {
             Some(i) => i.borrow_mut().activate(self, &*self.cfg.lock().unwrap()),
-            None => return Err(UnitActivateError::UnitNotFound),
+            None => Err(UnitActivateError::UnitNotFound),
         }
     }
 
@@ -590,7 +643,7 @@ impl UnitManager {
         // Activate the interface, which actually starts it up.
         match self.loggers.borrow().get(id) {
             Some(i) => i.borrow_mut().activate(self, &*self.cfg.lock().unwrap()),
-            None => return Err(UnitActivateError::UnitNotFound),
+            None => Err(UnitActivateError::UnitNotFound),
         }
     }
 
@@ -601,11 +654,13 @@ impl UnitManager {
 
         match *current_jig_opt {
             None => Err(UnitActivateError::UnitNotSelected),
-            Some(ref s) => if s.borrow_mut().id() != id {
-                Err(UnitActivateError::UnitNotSelected)
-            } else {
-                // Activate this jig.
-                s.borrow_mut().activate(self, &*self.cfg.lock().unwrap())
+            Some(ref s) => {
+                if s.borrow_mut().id() != id {
+                    Err(UnitActivateError::UnitNotSelected)
+                } else {
+                    // Activate this jig.
+                    s.borrow_mut().activate(self, &*self.cfg.lock().unwrap())
+                }
             }
         }
     }
@@ -617,12 +672,17 @@ impl UnitManager {
 
         match *current_opt {
             None => Err(UnitActivateError::UnitNotSelected),
-            Some(ref s) => if s.borrow().id() != id {
-                Err(UnitActivateError::UnitNotSelected)
-            } else {
-                // Activate this scenario.
-                self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(id.clone(), format!("scenario starting"))));
-                s.borrow_mut().activate(self, &*self.cfg.lock().unwrap())
+            Some(ref s) => {
+                if s.borrow().id() != id {
+                    Err(UnitActivateError::UnitNotSelected)
+                } else {
+                    // Activate this scenario.
+                    self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(
+                        id.clone(),
+                        "scenario starting".to_string(),
+                    )));
+                    s.borrow_mut().activate(self, &*self.cfg.lock().unwrap())
+                }
             }
         }
     }
@@ -630,14 +690,13 @@ impl UnitManager {
     fn activate_test(&self, id: &UnitName) -> Result<(), UnitActivateError> {
         match self.tests.borrow().get(id) {
             None => Err(UnitActivateError::UnitNotFound),
-            Some(ref s) => s.borrow_mut().activate(self, &*self.cfg.lock().unwrap()),
+            Some(s) => s.borrow_mut().activate(self, &*self.cfg.lock().unwrap()),
         }
     }
 
     pub fn deactivate(&self, id: &UnitName, reason: &str) {
-
         // Don't deactivate an inactive unit.
-        if ! self.active.borrow().contains_key(id) {
+        if !self.active.borrow().contains_key(id) {
             return;
         }
 
@@ -653,18 +712,26 @@ impl UnitManager {
         match result {
             Ok(_) => {
                 self.active.borrow_mut().remove(id);
-                self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_deactivate_success(id, reason.to_owned())))
-            },
-            Err(e) =>
-                self.bc.broadcast(
-                        &UnitEvent::Status(UnitStatusEvent::new_deactivate_failure(id, format!("unable to deactivate: {}", e)))),
+                self.bc
+                    .broadcast(&UnitEvent::Status(UnitStatusEvent::new_deactivate_success(
+                        id,
+                        reason.to_owned(),
+                    )))
+            }
+            Err(e) => {
+                self.bc
+                    .broadcast(&UnitEvent::Status(UnitStatusEvent::new_deactivate_failure(
+                        id,
+                        format!("unable to deactivate: {}", e),
+                    )))
+            }
         }
     }
 
     fn deactivate_interface(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
         let interfaces = self.interfaces.borrow();
         match interfaces.get(id) {
-            None => return Err(UnitDeactivateError::UnitNotFound),
+            None => Err(UnitDeactivateError::UnitNotFound),
             Some(interface) => interface.borrow_mut().deactivate(),
         }
     }
@@ -672,7 +739,7 @@ impl UnitManager {
     fn deactivate_trigger(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
         let triggers = self.triggers.borrow();
         match triggers.get(id) {
-            None => return Err(UnitDeactivateError::UnitNotFound),
+            None => Err(UnitDeactivateError::UnitNotFound),
             Some(trigger) => trigger.borrow_mut().deactivate(),
         }
     }
@@ -680,7 +747,7 @@ impl UnitManager {
     fn deactivate_logger(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
         let loggers = self.loggers.borrow();
         match loggers.get(id) {
-            None => return Err(UnitDeactivateError::UnitNotFound),
+            None => Err(UnitDeactivateError::UnitNotFound),
             Some(interface) => interface.borrow_mut().deactivate(),
         }
     }
@@ -688,7 +755,7 @@ impl UnitManager {
     fn deactivate_test(&self, id: &UnitName) -> Result<(), UnitDeactivateError> {
         let tests = self.tests.borrow();
         match tests.get(id) {
-            None => return Err(UnitDeactivateError::UnitNotFound),
+            None => Err(UnitDeactivateError::UnitNotFound),
             Some(test) => test.borrow_mut().deactivate(self),
         }
     }
@@ -703,9 +770,11 @@ impl UnitManager {
                 let current_scenario = s.borrow_mut();
                 if current_scenario.id() != id {
                     Ok(())
-                }
-                else {
-                    self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(id.clone(), format!("scenario ended"))));
+                } else {
+                    self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(
+                        id.clone(),
+                        "scenario ended".to_string(),
+                    )));
                     current_scenario.deactivate()
                 }
             }
@@ -722,8 +791,7 @@ impl UnitManager {
                 let current = s.borrow_mut();
                 if current.id() != id {
                     Ok(())
-                }
-                else {
+                } else {
                     current.deactivate()
                 }
             }
@@ -742,14 +810,14 @@ impl UnitManager {
             UnitKind::Internal => (),
         }
     }
-    
+
     fn unload_interface(&self, id: &UnitName) {
         self.deactivate(id, "interface is being unloaded");
         self.deselect(id, "interface is being unloaded");
 
         self.interfaces.borrow_mut().remove(id);
     }
-    
+
     fn unload_trigger(&self, id: &UnitName) {
         self.deactivate(id, "trigger is being unloaded");
         self.deselect(id, "trigger is being unloaded");
@@ -787,17 +855,11 @@ impl UnitManager {
     }
 
     pub fn get_scenario_named(&self, id: &UnitName) -> Option<Rc<RefCell<Scenario>>> {
-        match self.scenarios.borrow().get(id) {
-            None => None,
-            Some(scenario) => Some(scenario.clone())
-        }
+        self.scenarios.borrow().get(id).cloned()
     }
 
     pub fn get_test_named(&self, id: &UnitName) -> Option<Rc<RefCell<Test>>> {
-        match self.tests.borrow().get(id) {
-            None => None,
-            Some(test) => Some(test.clone()),
-        }
+        self.tests.borrow().get(id).cloned()
     }
 
     pub fn get_tests(&self) -> Rc<RefCell<HashMap<UnitName, Rc<RefCell<Test>>>>> {
@@ -808,48 +870,57 @@ impl UnitManager {
         self.scenarios.clone()
     }
 
-     pub fn jig_is_loaded(&self, id: &UnitName) -> bool {
+    pub fn jig_is_loaded(&self, id: &UnitName) -> bool {
         self.jigs.borrow().get(id).is_some()
     }
 
     pub fn process_message(&self, msg: &UnitEvent) {
         match msg {
-            &UnitEvent::ManagerRequest(ref req) => self.manager_request(req),
-            &UnitEvent::Status(ref stat) => self.status_message(stat),
-            &UnitEvent::Log(ref log) => {
+            UnitEvent::ManagerRequest(ref req) => self.manager_request(req),
+            UnitEvent::Status(ref stat) => self.status_message(stat),
+            UnitEvent::Log(ref log) => {
                 let mut units_to_deactivate = vec![];
                 for (interface_id, interface) in self.interfaces.borrow().iter() {
                     let log_status_msg = ManagerStatusMessage::Log(log.clone());
                     if let Err(e) = interface.borrow().output_message(log_status_msg) {
-                        units_to_deactivate.push((interface_id.clone(), format!("unable to send message to interface: {:?}", e)));
+                        units_to_deactivate.push((
+                            interface_id.clone(),
+                            format!("unable to send message to interface: {:?}", e),
+                        ));
                     }
                 }
                 for (logger_id, logger) in self.loggers.borrow().iter() {
                     let log_status_msg = ManagerStatusMessage::Log(log.clone());
                     if let Err(e) = logger.borrow().output_message(log_status_msg) {
-                        units_to_deactivate.push((logger_id.clone(), format!("unable to send message to logger: {:?}", e)));
+                        units_to_deactivate.push((
+                            logger_id.clone(),
+                            format!("unable to send message to logger: {:?}", e),
+                        ));
                     }
                 }
                 for (unit_id, reason) in units_to_deactivate {
                     self.deactivate(&unit_id, &reason);
                 }
-            },
+            }
             _ => (),
         }
     }
 
     fn status_message(&self, msg: &UnitStatusEvent) {
-        let &UnitStatusEvent {ref name, ref status} = msg;
+        let &UnitStatusEvent {
+            ref name,
+            ref status,
+        } = msg;
         match status {
-            &UnitStatus::Loaded => match name.kind() {
-                &UnitKind::Jig => self.broadcast_jig_named(name),
-                &UnitKind::Scenario => self.broadcast_scenario_named(name),
-                &UnitKind::Test => self.broadcast_test_named(name),
+            UnitStatus::Loaded => match name.kind() {
+                UnitKind::Jig => self.broadcast_jig_named(name),
+                UnitKind::Scenario => self.broadcast_scenario_named(name),
+                UnitKind::Test => self.broadcast_test_named(name),
                 _ => (),
             },
-            &UnitStatus::Selected => match name.kind() {
-                &UnitKind::Jig => self.broadcast_selected_jig(),
-                &UnitKind::Scenario => self.broadcast_selected_scenario(),
+            UnitStatus::Selected => match name.kind() {
+                UnitKind::Jig => self.broadcast_selected_jig(),
+                UnitKind::Scenario => self.broadcast_selected_scenario(),
                 _ => (),
             },
             _ => (),
@@ -857,24 +928,39 @@ impl UnitManager {
     }
 
     fn manager_request(&self, msg: &ManagerControlMessage) {
-        let &ManagerControlMessage {sender: ref sender_name, contents: ref msg} = msg;
+        let &ManagerControlMessage {
+            sender: ref sender_name,
+            contents: ref msg,
+        } = msg;
 
         match *msg {
             ManagerControlMessageContents::Scenarios => self.send_scenarios_to(sender_name),
-            ManagerControlMessageContents::Tests(ref scenario_name) => self.send_tests_to(sender_name, scenario_name),
-            ManagerControlMessageContents::Log(ref txt) => self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(sender_name.clone(), txt.clone()))),
-            ManagerControlMessageContents::LogError(ref txt) => self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), txt.clone()))),
+            ManagerControlMessageContents::Tests(ref scenario_name) => {
+                self.send_tests_to(sender_name, scenario_name)
+            }
+            ManagerControlMessageContents::Log(ref txt) => self.bc.broadcast(&UnitEvent::Log(
+                LogEntry::new_info(sender_name.clone(), txt.clone()),
+            )),
+            ManagerControlMessageContents::LogError(ref txt) => self.bc.broadcast(&UnitEvent::Log(
+                LogEntry::new_error(sender_name.clone(), txt.clone()),
+            )),
             ManagerControlMessageContents::Scenario(ref new_scenario_name) => {
                 if self.get_scenario_named(new_scenario_name).is_some() {
                     self.select(new_scenario_name);
                     self.broadcast_selected_scenario();
                 } else {
-                    self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unable to find scenario {}", new_scenario_name))));
+                    self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(
+                        sender_name.clone(),
+                        format!("unable to find scenario {}", new_scenario_name),
+                    )));
                 }
-            },
+            }
             ManagerControlMessageContents::Error(ref err) => {
-                self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), err.clone())));
-            },
+                self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(
+                    sender_name.clone(),
+                    err.clone(),
+                )));
+            }
             ManagerControlMessageContents::Jig => self.send_jig_to(sender_name),
             ManagerControlMessageContents::InitialGreeting => {
                 // Send some initial information to the client.
@@ -885,24 +971,38 @@ impl UnitManager {
                 if let Some(ref sc) = *self.current_scenario.borrow() {
                     self.send_scenario_to(sender_name, &sc.borrow().id().clone());
                 }
-            },
+            }
             ManagerControlMessageContents::ChildExited => {
-                self.bc.broadcast(&UnitEvent::Status(UnitStatusEvent::new_active_failed(sender_name, "Unit unexpectedly exited".to_owned())));
-            },
+                self.bc
+                    .broadcast(&UnitEvent::Status(UnitStatusEvent::new_active_failed(
+                        sender_name,
+                        "Unit unexpectedly exited".to_owned(),
+                    )));
+            }
             ManagerControlMessageContents::AdvanceScenario(result) => {
                 match *self.current_scenario.borrow() {
                     None => (),
-                    Some(ref current_scenario) => current_scenario.borrow_mut().advance(sender_name, result, &self.control_sender),
+                    Some(ref current_scenario) => current_scenario.borrow_mut().advance(
+                        sender_name,
+                        result,
+                        &self.control_sender,
+                    ),
                 }
-            },
+            }
             ManagerControlMessageContents::Unimplemented(ref verb, ref remainder) => {
-                self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unimplemented verb: {} (args: {})", verb, remainder))));
-            },
+                self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(
+                    sender_name.clone(),
+                    format!("unimplemented verb: {} (args: {})", verb, remainder),
+                )));
+            }
             ManagerControlMessageContents::StartScenario(ref scenario_name_opt) => {
                 // If a scenario exists and is running, don't start a new one.
                 if let Some(ref scenario) = *self.current_scenario.borrow() {
                     if scenario.borrow().is_running() {
-                        self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), "unable to start scenario: scenario not idle".to_owned())));
+                        self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(
+                            sender_name.clone(),
+                            "unable to start scenario: scenario not idle".to_owned(),
+                        )));
                         return;
                     }
                 }
@@ -914,17 +1014,17 @@ impl UnitManager {
                         None => {
                             self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), "unable to start scenario: no scenario selected and no scenario specified".to_owned())));
                             return;
-                        },
-                        Some(ref scenario) => scenario.borrow().id().clone()
+                        }
+                        Some(ref scenario) => scenario.borrow().id().clone(),
                     }
                 };
 
                 self.activate(&scenario_name);
                 self.broadcast_message(ManagerStatusMessage::Start(scenario_name));
-            },
+            }
             ManagerControlMessageContents::Skip(ref test_name, ref reason) => {
                 self.broadcast_skipped(test_name, reason);
-            },
+            }
             ManagerControlMessageContents::TestStarted => {
                 self.broadcast_message(ManagerStatusMessage::Running(sender_name.clone()));
             }
@@ -939,7 +1039,7 @@ impl UnitManager {
                 // Since a scenario is finishing, the current scenario MUST not be None.
                 {
                     let cs = self.current_scenario.borrow();
-                    self.deactivate(cs.as_ref().unwrap().borrow().id(), &message);
+                    self.deactivate(cs.as_ref().unwrap().borrow().id(), message);
                 }
                 self.broadcast_finished(sender_name, code, message);
             }
@@ -951,17 +1051,23 @@ impl UnitManager {
             }
             ManagerControlMessageContents::Shutdown(ref reason) => {
                 let txt = match reason {
-                    &None => format!("shutdown requested (no reason given)"),
-                    &Some(ref s) => format!("shutdown requested: {}", s),
+                    None => "shutdown requested (no reason given)".to_string(),
+                    Some(ref s) => format!("shutdown requested: {}", s),
                 };
-                self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(sender_name.clone(), txt)));
+                self.bc.broadcast(&UnitEvent::Log(LogEntry::new_info(
+                    sender_name.clone(),
+                    txt,
+                )));
                 self.bc.broadcast(&UnitEvent::Shutdown);
             }
         }
     }
 
     pub fn send_hello_to(&self, sender_name: &UnitName) {
-        self.send_messages_to(sender_name, vec![ManagerStatusMessage::Hello("Jig/20 1.0".to_owned())]);
+        self.send_messages_to(
+            sender_name,
+            vec![ManagerStatusMessage::Hello("Jig/20 1.0".to_owned())],
+        );
     }
 
     pub fn send_jig_to(&self, sender_name: &UnitName) {
@@ -971,8 +1077,16 @@ impl UnitManager {
                 let jig = jig_rc.borrow();
                 vec![
                     ManagerStatusMessage::Jig(Some(jig.id().clone())),
-                    ManagerStatusMessage::Describe(jig.id().clone(), FieldType::Name, jig.name().clone()),
-                    ManagerStatusMessage::Describe(jig.id().clone(), FieldType::Description, jig.description().clone())
+                    ManagerStatusMessage::Describe(
+                        jig.id().clone(),
+                        FieldType::Name,
+                        jig.name().clone(),
+                    ),
+                    ManagerStatusMessage::Describe(
+                        jig.id().clone(),
+                        FieldType::Description,
+                        jig.description().clone(),
+                    ),
                 ]
             }
         };
@@ -981,10 +1095,20 @@ impl UnitManager {
 
     /// Send all available scenarios to the specified endpoint.
     pub fn send_scenarios_to(&self, sender_name: &UnitName) {
-        let mut messages = vec![ManagerStatusMessage::Scenarios(self.scenarios.borrow().keys().map(|x| x.clone()).collect())];
+        let mut messages = vec![ManagerStatusMessage::Scenarios(
+            self.scenarios.borrow().keys().cloned().collect(),
+        )];
         for (scenario_id, scenario) in self.scenarios.borrow().iter() {
-            messages.push(ManagerStatusMessage::Describe(scenario_id.clone(), FieldType::Name, scenario.borrow().name().clone()));
-            messages.push(ManagerStatusMessage::Describe(scenario_id.clone(), FieldType::Description, scenario.borrow().description().clone()));
+            messages.push(ManagerStatusMessage::Describe(
+                scenario_id.clone(),
+                FieldType::Name,
+                scenario.borrow().name().clone(),
+            ));
+            messages.push(ManagerStatusMessage::Describe(
+                scenario_id.clone(),
+                FieldType::Description,
+                scenario.borrow().description().clone(),
+            ));
         }
         self.send_messages_to(sender_name, messages);
     }
@@ -994,13 +1118,25 @@ impl UnitManager {
             None => vec![ManagerStatusMessage::Scenario(None)],
             Some(scenario_rc) => {
                 let scenario = scenario_rc.borrow();
-                let mut messages = vec![ManagerStatusMessage::Scenario(Some(scenario_name.clone()))];
+                let mut messages =
+                    vec![ManagerStatusMessage::Scenario(Some(scenario_name.clone()))];
                 for (test_id, test_rc) in scenario.tests() {
                     let test = test_rc.borrow();
-                    messages.push(ManagerStatusMessage::Describe(test_id.clone(), FieldType::Name, test.name().clone()));
-                    messages.push(ManagerStatusMessage::Describe(test_id.clone(), FieldType::Description, test.description().clone()));
+                    messages.push(ManagerStatusMessage::Describe(
+                        test_id.clone(),
+                        FieldType::Name,
+                        test.name().clone(),
+                    ));
+                    messages.push(ManagerStatusMessage::Describe(
+                        test_id.clone(),
+                        FieldType::Description,
+                        test.description().clone(),
+                    ));
                 }
-                messages.push(ManagerStatusMessage::Tests(scenario.id().clone(), scenario.test_sequence()));
+                messages.push(ManagerStatusMessage::Tests(
+                    scenario.id().clone(),
+                    scenario.test_sequence(),
+                ));
                 messages
             }
         };
@@ -1015,18 +1151,31 @@ impl UnitManager {
             None => match *self.current_scenario.borrow() {
                 Some(ref cs) => cs.borrow().id().clone(),
                 None => {
-                    self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), "unable to list tests, no scenario specified and no scenario selected".to_owned())));
+                    self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(
+                        sender_name.clone(),
+                        "unable to list tests, no scenario specified and no scenario selected"
+                            .to_owned(),
+                    )));
                     return;
                 }
-            }
+            },
         };
         let scenarios = self.scenarios.borrow();
         let scenario_rc_opt = scenarios.get(&scenario_id);
         match scenario_rc_opt {
-            None => self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(sender_name.clone(), format!("unable to list tests, scenario {} not found", scenario_id)))),
-            Some(ref sc_ref) => {
+            None => self.bc.broadcast(&UnitEvent::Log(LogEntry::new_error(
+                sender_name.clone(),
+                format!("unable to list tests, scenario {} not found", scenario_id),
+            ))),
+            Some(sc_ref) => {
                 let scenario = sc_ref.borrow();
-                self.send_messages_to(sender_name, vec![ManagerStatusMessage::Tests(scenario.id().clone(), scenario.test_sequence())])
+                self.send_messages_to(
+                    sender_name,
+                    vec![ManagerStatusMessage::Tests(
+                        scenario.id().clone(),
+                        scenario.test_sequence(),
+                    )],
+                )
             }
         }
     }
@@ -1034,13 +1183,11 @@ impl UnitManager {
     fn broadcast_selected_jig(&self) {
         let jig_opt = self.current_jig.borrow();
         match *jig_opt {
-            None => return,
+            None => {}
             Some(ref j) => {
                 let jig = j.borrow();
                 for (interface_id, _) in self.interfaces.borrow().iter() {
-                    let messages = vec![
-                        ManagerStatusMessage::Jig(Some(jig.id().clone()))
-                    ];
+                    let messages = vec![ManagerStatusMessage::Jig(Some(jig.id().clone()))];
                     self.send_messages_to(interface_id, messages);
                 }
             }
@@ -1048,7 +1195,8 @@ impl UnitManager {
     }
 
     fn broadcast_scenario_list(&self) {
-        let msg = ManagerStatusMessage::Scenarios(self.scenarios.borrow().keys().map(|x| x.clone()).collect());
+        let msg =
+            ManagerStatusMessage::Scenarios(self.scenarios.borrow().keys().cloned().collect());
         for (interface_id, _) in self.interfaces.borrow().iter() {
             self.send_messages_to(interface_id, vec![msg.clone()]);
         }
@@ -1057,13 +1205,16 @@ impl UnitManager {
     fn broadcast_selected_scenario(&self) {
         let opt = self.current_scenario.borrow();
         match *opt {
-            None => return,
+            None => {}
             Some(ref j) => {
                 let scenario = j.borrow();
                 for (interface_id, _) in self.interfaces.borrow().iter() {
                     let messages = vec![
                         ManagerStatusMessage::Scenario(Some(scenario.id().clone())),
-                        ManagerStatusMessage::Tests(scenario.id().clone(), scenario.test_sequence())
+                        ManagerStatusMessage::Tests(
+                            scenario.id().clone(),
+                            scenario.test_sequence(),
+                        ),
                     ];
                     self.send_messages_to(interface_id, messages);
                 }
@@ -1074,14 +1225,22 @@ impl UnitManager {
     fn broadcast_jig_named(&self, jig_id: &UnitName) {
         let jigs = self.jigs.borrow();
         let jig = match jigs.get(jig_id) {
-            Some(ref s) => s.clone(),
+            Some(s) => s.clone(),
             None => return,
         };
         for (interface_id, _) in self.interfaces.borrow().iter() {
             let jig = jig.borrow();
             let messages = vec![
-                ManagerStatusMessage::Describe(jig.id().clone(), FieldType::Name, jig.name().clone()),
-                ManagerStatusMessage::Describe(jig.id().clone(), FieldType::Description, jig.description().clone())
+                ManagerStatusMessage::Describe(
+                    jig.id().clone(),
+                    FieldType::Name,
+                    jig.name().clone(),
+                ),
+                ManagerStatusMessage::Describe(
+                    jig.id().clone(),
+                    FieldType::Description,
+                    jig.description().clone(),
+                ),
             ];
             self.send_messages_to(interface_id, messages);
         }
@@ -1090,7 +1249,7 @@ impl UnitManager {
     fn broadcast_scenario_named(&self, scenario_id: &UnitName) {
         let scenarios = self.scenarios.borrow();
         let scenario = match scenarios.get(scenario_id) {
-            Some(ref s) => s.clone(),
+            Some(s) => s.clone(),
             None => return,
         };
 
@@ -1099,8 +1258,16 @@ impl UnitManager {
             let scenario = scenario.borrow();
             vec![
                 // Rebroadcast the list of scenarios, since that may have changed.
-                ManagerStatusMessage::Describe(scenario_id.clone(), FieldType::Name, scenario.name().clone()),
-                ManagerStatusMessage::Describe(scenario_id.clone(), FieldType::Description, scenario.description().clone())
+                ManagerStatusMessage::Describe(
+                    scenario_id.clone(),
+                    FieldType::Name,
+                    scenario.name().clone(),
+                ),
+                ManagerStatusMessage::Describe(
+                    scenario_id.clone(),
+                    FieldType::Description,
+                    scenario.description().clone(),
+                ),
             ]
         };
         for (interface_id, _) in self.interfaces.borrow().iter() {
@@ -1111,28 +1278,36 @@ impl UnitManager {
     fn broadcast_test_named(&self, unit_id: &UnitName) {
         let units = self.tests.borrow();
         let unit = match units.get(unit_id) {
-            Some(ref s) => s.clone(),
+            Some(s) => s.clone(),
             None => return,
         };
         for (interface_id, _) in self.interfaces.borrow().iter() {
             let unit = unit.borrow();
             let messages = vec![
-                ManagerStatusMessage::Describe(unit_id.clone(), FieldType::Name, unit.name().clone()),
-                ManagerStatusMessage::Describe(unit_id.clone(), FieldType::Description, unit.description().clone())
+                ManagerStatusMessage::Describe(
+                    unit_id.clone(),
+                    FieldType::Name,
+                    unit.name().clone(),
+                ),
+                ManagerStatusMessage::Describe(
+                    unit_id.clone(),
+                    FieldType::Description,
+                    unit.description().clone(),
+                ),
             ];
             self.send_messages_to(interface_id, messages);
         }
     }
 
-    fn broadcast_skipped(&self, unit_id: &UnitName, reason: &String) {
-        let msg = ManagerStatusMessage::Skipped(unit_id.clone(), reason.clone());
+    fn broadcast_skipped(&self, unit_id: &UnitName, reason: &str) {
+        let msg = ManagerStatusMessage::Skipped(unit_id.clone(), reason.to_owned());
         for (interface_id, _) in self.interfaces.borrow().iter() {
             self.send_messages_to(interface_id, vec![msg.clone()]);
         }
     }
 
-    fn broadcast_finished(&self, unit_id: &UnitName, code: u32, message: &String) {
-        let msg = ManagerStatusMessage::Finished(unit_id.clone(), code, message.clone());
+    fn broadcast_finished(&self, unit_id: &UnitName, code: u32, message: &str) {
+        let msg = ManagerStatusMessage::Finished(unit_id.clone(), code, message.to_owned());
         for (interface_id, _) in self.interfaces.borrow().iter() {
             self.send_messages_to(interface_id, vec![msg.clone()]);
         }
@@ -1147,21 +1322,23 @@ impl UnitManager {
     /// Send a Vec<ManagerStatusMessage> to a specific endpoint.
     pub fn send_messages_to(&self, sender_name: &UnitName, messages: Vec<ManagerStatusMessage>) {
         let mut deactivate_reason = None;
-        match *sender_name.kind() {
-            UnitKind::Interface => {
-                let interface_table = self.interfaces.borrow();
-                let interface = interface_table.get(sender_name).expect("Unable to find Interface in the library");
-                for msg in messages {
-                    if let Err(e) = interface.borrow().output_message(msg) {
-                        deactivate_reason = Some(e);
-                        break;
-                    }
+        if *sender_name.kind() == UnitKind::Interface {
+            let interface_table = self.interfaces.borrow();
+            let interface = interface_table
+                .get(sender_name)
+                .expect("Unable to find Interface in the library");
+            for msg in messages {
+                if let Err(e) = interface.borrow().output_message(msg) {
+                    deactivate_reason = Some(e);
+                    break;
                 }
-            },
-            _ => (),
+            }
         }
         if let Some(deactivate_reason) = deactivate_reason {
-            self.deactivate(sender_name, format!("communication error: {}", deactivate_reason).as_str());
+            self.deactivate(
+                sender_name,
+                format!("communication error: {}", deactivate_reason).as_str(),
+            );
         }
     }
 }

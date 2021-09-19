@@ -9,18 +9,20 @@ use std::sync::mpsc::Sender;
 use std::thread;
 
 use config::Config;
-use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitIncompatibleReason, UnitSelectError, UnitDeselectError,
-           UnitName};
+use unit::{
+    UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitDeselectError,
+    UnitIncompatibleReason, UnitName, UnitSelectError,
+};
 use unitmanager::{ManagerControlMessage, ManagerControlMessageContents, UnitManager};
 
-use self::systemd_parser::items::DirectiveEntry;
-use self::runny::Runny;
 use self::runny::running::{Running, RunningOutput};
+use self::runny::Runny;
+use self::systemd_parser::items::DirectiveEntry;
 
 #[derive(Clone, Copy)]
 enum TriggerFormat {
     Text,
-    JSON,
+    Json,
 }
 
 /// A struct defining an in-memory representation of a .Trigger file
@@ -76,8 +78,8 @@ impl TriggerDescription {
         };
 
         for entry in unit_file.lookup_by_category("Trigger") {
-            match entry {
-                &DirectiveEntry::Solo(ref directive) => match directive.key() {
+            if let DirectiveEntry::Solo(ref directive) = entry {
+                match directive.key() {
                     "Name" => {
                         interface_description.name = directive.value().unwrap_or("").to_owned()
                     }
@@ -112,7 +114,7 @@ impl TriggerDescription {
                             None => TriggerFormat::Text,
                             Some(s) => match s.to_string().to_lowercase().as_ref() {
                                 "text" => TriggerFormat::Text,
-                                "json" => TriggerFormat::JSON,
+                                "json" => TriggerFormat::Json,
                                 other => {
                                     return Err(UnitDescriptionError::InvalidValue(
                                         "Trigger".to_owned(),
@@ -125,8 +127,7 @@ impl TriggerDescription {
                         }
                     }
                     &_ => (),
-                },
-                &_ => (),
+                }
             }
         }
         Ok(interface_description)
@@ -143,11 +144,11 @@ impl TriggerDescription {
         manager: &UnitManager,
         _: &Config,
     ) -> Result<(), UnitIncompatibleReason> {
-        if self.jigs.len() == 0 {
+        if self.jigs.is_empty() {
             return Ok(());
         }
         for jig_name in &self.jigs {
-            if manager.jig_is_loaded(&jig_name) {
+            if manager.jig_is_loaded(jig_name) {
                 return Ok(());
             }
         }
@@ -200,8 +201,11 @@ impl Trigger {
         config: &Config,
     ) -> Result<(), UnitActivateError> {
         let mut running = Runny::new(self.description.exec_start.as_str())
-                    .directory(&Some(config.working_directory(&self.description.unit_directory, &self.description.working_directory)))
-                    .start()?;
+            .directory(&Some(config.working_directory(
+                &self.description.unit_directory,
+                &self.description.working_directory,
+            )))
+            .start()?;
 
         let stdout = running.take_output();
         let stderr = running.take_error();
@@ -219,15 +223,18 @@ impl Trigger {
                 let thr_sender = control_sender.clone();
                 thread::spawn(move || Self::text_read_stderr(thr_sender_id, thr_sender, stderr));
             }
-            TriggerFormat::JSON => {
-                ();
-            }
+            TriggerFormat::Json => {}
         };
 
         *self.process.borrow_mut() = Some(running);
 
         // Send some initial configuration to the client.
-        control_sender.send(ManagerControlMessage::new(&control_sender_id, ManagerControlMessageContents::InitialGreeting)).ok();
+        control_sender
+            .send(ManagerControlMessage::new(
+                &control_sender_id,
+                ManagerControlMessageContents::InitialGreeting,
+            ))
+            .ok();
 
         Ok(())
     }
@@ -241,8 +248,7 @@ impl Trigger {
                 },
                 Err(e) => Err(UnitDeactivateError::RunningError(e)),
             }
-        }
-        else {
+        } else {
             Ok(())
         }
     }
@@ -254,11 +260,21 @@ impl Trigger {
             .replace("\\\\", "\\")
     }
 
-    fn text_read_stderr(id: UnitName, control: Sender<ManagerControlMessage>, output: RunningOutput) {
+    fn text_read_stderr(
+        id: UnitName,
+        control: Sender<ManagerControlMessage>,
+        output: RunningOutput,
+    ) {
         for line in BufReader::new(output).lines() {
             let line = line.expect("Unable to get next line");
             // If the send fails, that means the other end has closed the pipe.
-            if let Err(_) = control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::LogError(line))) {
+            if control
+                .send(ManagerControlMessage::new(
+                    &id,
+                    ManagerControlMessageContents::LogError(line),
+                ))
+                .is_err()
+            {
                 break;
             }
         }
@@ -267,40 +283,54 @@ impl Trigger {
     fn text_read(id: UnitName, control: Sender<ManagerControlMessage>, stdout: RunningOutput) {
         for line in BufReader::new(stdout).lines() {
             let line = line.expect("Unable to get next line");
-            let mut words: Vec<String> = line.split_whitespace()
+            let mut words: Vec<String> = line
+                .split_whitespace()
                 .map(|x| Self::cfti_unescape(x.to_owned()))
                 .collect();
 
             // Don't crash if we get a blank line.
-            let msg = if words.len() == 0 {
+            let msg = if words.is_empty() {
                 ManagerControlMessageContents::StartScenario(None)
-            }
-            else {
-
+            } else {
                 let verb = words[0].to_lowercase();
                 words.remove(0);
 
                 match verb.as_str() {
-                    "stop" => ManagerControlMessageContents::Unimplemented("stop".to_owned(), "Unable to stop tests".to_owned()),
+                    "stop" => ManagerControlMessageContents::Unimplemented(
+                        "stop".to_owned(),
+                        "Unable to stop tests".to_owned(),
+                    ),
                     "start" => {
-                        if words.len() > 0 {
+                        if !words.is_empty() {
                             match UnitName::from_str(&words[0], "test") {
-                                Ok(name) => ManagerControlMessageContents::StartScenario(Some(name)),
-                                Err(_) => ManagerControlMessageContents::Unimplemented(words[0].clone(), "name could not be decoded".to_owned()),
+                                Ok(name) => {
+                                    ManagerControlMessageContents::StartScenario(Some(name))
+                                }
+                                Err(_) => ManagerControlMessageContents::Unimplemented(
+                                    words[0].clone(),
+                                    "name could not be decoded".to_owned(),
+                                ),
                             }
                         } else {
                             ManagerControlMessageContents::StartScenario(None)
                         }
-                    },
-                    v => ManagerControlMessageContents::Unimplemented(v.to_owned(), words.join(" ")),
+                    }
+                    v => {
+                        ManagerControlMessageContents::Unimplemented(v.to_owned(), words.join(" "))
+                    }
                 }
             };
 
             // If the send fails, that means the other end has closed the pipe.
-            if let Err(_) = control.send(ManagerControlMessage::new(&id, msg)) {
+            if control.send(ManagerControlMessage::new(&id, msg)).is_err() {
                 break;
             }
         }
-        control.send(ManagerControlMessage::new(&id, ManagerControlMessageContents::ChildExited)).expect("interface couldn't send exit message to controller");
+        control
+            .send(ManagerControlMessage::new(
+                &id,
+                ManagerControlMessageContents::ChildExited,
+            ))
+            .expect("interface couldn't send exit message to controller");
     }
 }

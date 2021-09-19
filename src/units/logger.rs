@@ -7,24 +7,27 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Error, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
-use std::time::Duration;
 use std::thread;
+use std::time::Duration;
 
 use config::Config;
-use unit::{UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitDeselectError,
-           UnitIncompatibleReason, UnitName, UnitSelectError};
+use unit::{
+    UnitActivateError, UnitDeactivateError, UnitDescriptionError, UnitDeselectError,
+    UnitIncompatibleReason, UnitName, UnitSelectError,
+};
 use unitbroadcaster::LogEntry;
-use unitmanager::{ManagerControlMessage, ManagerControlMessageContents, ManagerStatusMessage,
-                  UnitManager};
+use unitmanager::{
+    ManagerControlMessage, ManagerControlMessageContents, ManagerStatusMessage, UnitManager,
+};
 
-use self::systemd_parser::items::DirectiveEntry;
-use self::runny::Runny;
 use self::runny::running::{Running, RunningOutput};
+use self::runny::Runny;
+use self::systemd_parser::items::DirectiveEntry;
 
 #[derive(Clone, Copy)]
 enum LoggerFormat {
-    TSV,
-    JSON,
+    Tsv,
+    Json,
 }
 
 /// A struct defining an in-memory representation of a .logger file
@@ -76,7 +79,7 @@ impl LoggerDescription {
             name: "".to_owned(),
             description: "".to_owned(),
             jigs: vec![],
-            format: LoggerFormat::TSV,
+            format: LoggerFormat::Tsv,
             exec_start: "".to_owned(),
             working_directory: None,
             unit_directory: path.parent().unwrap().to_owned(),
@@ -84,8 +87,8 @@ impl LoggerDescription {
         };
 
         for entry in unit_file.lookup_by_category("Logger") {
-            match entry {
-                &DirectiveEntry::Solo(ref directive) => match directive.key() {
+            if let DirectiveEntry::Solo(ref directive) = entry {
+                match directive.key() {
                     "Name" => logger_description.name = directive.value().unwrap_or("").to_owned(),
                     "Description" => {
                         logger_description.description = directive.value().unwrap_or("").to_owned()
@@ -114,10 +117,10 @@ impl LoggerDescription {
                     }
                     "Format" => {
                         logger_description.format = match directive.value() {
-                            None => LoggerFormat::TSV,
+                            None => LoggerFormat::Tsv,
                             Some(s) => match s.to_string().to_lowercase().as_ref() {
-                                "tsv" => LoggerFormat::TSV,
-                                "json" => LoggerFormat::JSON,
+                                "tsv" => LoggerFormat::Tsv,
+                                "json" => LoggerFormat::Json,
                                 other => {
                                     return Err(UnitDescriptionError::InvalidValue(
                                         "Logger".to_owned(),
@@ -130,8 +133,7 @@ impl LoggerDescription {
                         }
                     }
                     &_ => (),
-                },
-                &_ => (),
+                }
             }
         }
         Ok(logger_description)
@@ -148,11 +150,11 @@ impl LoggerDescription {
         manager: &UnitManager,
         _: &Config,
     ) -> Result<(), UnitIncompatibleReason> {
-        if self.jigs.len() == 0 {
+        if self.jigs.is_empty() {
             return Ok(());
         }
         for jig_name in &self.jigs {
-            if manager.jig_is_loaded(&jig_name) {
+            if manager.jig_is_loaded(jig_name) {
                 return Ok(());
             }
         }
@@ -203,10 +205,13 @@ impl Logger {
         for line in BufReader::new(output).lines() {
             let line = line.expect("Unable to get next line");
             // If the send fails, that means the other end has closed the pipe.
-            if let Err(_) = control.send(ManagerControlMessage::new(
-                &id,
-                ManagerControlMessageContents::LogError(line),
-            )) {
+            if control
+                .send(ManagerControlMessage::new(
+                    &id,
+                    ManagerControlMessageContents::LogError(line),
+                ))
+                .is_err()
+            {
                 break;
             }
         }
@@ -218,9 +223,10 @@ impl Logger {
         config: &Config,
     ) -> Result<(), UnitActivateError> {
         let mut running = Runny::new(self.description.exec_start.as_str())
-            .directory(&Some(
-                config.working_directory(&self.description.unit_directory, &self.description.working_directory),
-            ))
+            .directory(&Some(config.working_directory(
+                &self.description.unit_directory,
+                &self.description.working_directory,
+            )))
             .start()?;
 
         // Have stdout and stderr log their output.
@@ -231,9 +237,7 @@ impl Logger {
         let thr_sender_id = control_sender_id.clone();
         let thr_sender = control_sender.clone();
         thread::spawn(move || Self::text_read(thr_sender_id, thr_sender, stdout));
-        thread::spawn(move || {
-            Self::text_read(control_sender_id, control_sender, stderr)
-        });
+        thread::spawn(move || Self::text_read(control_sender_id, control_sender, stderr));
 
         let control_sender = manager.get_control_channel();
         let control_sender_id = self.id().clone();
@@ -276,11 +280,10 @@ impl Logger {
         let process = process_opt.as_mut().unwrap();
 
         match msg {
-            ManagerStatusMessage::Log(l) =>
-                match self.description.format {
-                    LoggerFormat::TSV => self.tsv_write(l, process),
-                    LoggerFormat::JSON => self.json_write(l, process),
-                },
+            ManagerStatusMessage::Log(l) => match self.description.format {
+                LoggerFormat::Tsv => self.tsv_write(l, process),
+                LoggerFormat::Json => self.json_write(l, process),
+            },
             _ => Ok(()),
         }
     }
@@ -299,7 +302,7 @@ impl Logger {
         writeln!(process, "{}", serde_json::to_string(&entry)?)
     }
 
-    fn cfti_escape(msg: &String) -> String {
+    fn cfti_escape(msg: &str) -> String {
         msg.replace("\\", "\\\\")
             .replace("\t", "\\t")
             .replace("\n", "\\n")

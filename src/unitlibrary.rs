@@ -10,10 +10,10 @@ use unit::{UnitKind, UnitName};
 use unitbroadcaster::{UnitBroadcaster, UnitCategoryEvent, UnitEvent, UnitStatus, UnitStatusEvent};
 use unitmanager::UnitManager;
 use units::interface::InterfaceDescription;
-use units::jig::{JigDescription};
+use units::jig::JigDescription;
 use units::logger::LoggerDescription;
-use units::scenario::{ScenarioDescription};
-use units::test::{TestDescription};
+use units::scenario::ScenarioDescription;
+use units::test::TestDescription;
 use units::trigger::TriggerDescription;
 
 macro_rules! process_if {
@@ -25,13 +25,12 @@ macro_rules! process_if {
                 Err(e) => {
                     let status = UnitStatus::LoadFailed(format!("{}", e));
 
-                    $slf.broadcaster
-                        .broadcast(&UnitEvent::Status(UnitStatusEvent::new_load_failed($name, format!("{}", e))));
+                    $slf.broadcaster.broadcast(&UnitEvent::Status(
+                        UnitStatusEvent::new_load_failed($name, format!("{}", e)),
+                    ));
                     // Add an entry to the status to report unit failure.
-                    $slf.unit_status
-                        .borrow_mut()
-                        .insert($name.clone(), status);
-                },
+                    $slf.unit_status.borrow_mut().insert($name.clone(), status);
+                }
                 Ok(description) => {
                     // Insert it into the description table
                     $slf.$desc.borrow_mut().insert($name.clone(), description);
@@ -42,78 +41,80 @@ macro_rules! process_if {
                         .insert($name.clone(), $status.clone());
 
                     $slf.broadcaster
-                        .broadcast(&UnitEvent::Category(UnitCategoryEvent::new($tstkind,
-                                                                            &format!(
+                        .broadcast(&UnitEvent::Category(UnitCategoryEvent::new(
+                            $tstkind,
+                            &format!(
                                 "Number of units \
                                 on disk: {}",
                                 $slf.$desc.borrow().len()
-                            ))));
+                            ),
+                        )));
                 }
             }
         }
-    }
+    };
 }
 
 macro_rules! load_units_for_activation {
-    ($slf:ident, $statuses:ident, $dirty:ident, $descriptions:ident, $load:ident) => {
-        {
-            let mut to_remove = vec![];
-            for (id, _) in $slf.$dirty.borrow().iter() {
-                let load_result = {
-                    let status = $statuses.get(id);
-                    if status.is_none() {
-                        to_remove.push(id.clone());
-                        continue;
-                    }
-                    let status = status.unwrap();
-
-                    let descriptions = $slf.$descriptions.borrow();
-                    let description = descriptions.get(id);
-                    if description.is_none() {
-                        to_remove.push(id.clone());
-                        continue;
-                    }
-                    let description = description.unwrap();
-
-                    $slf.unit_manager.borrow_mut().unload(id);
-
-                    match status {
-                        &UnitStatus::LoadStarted(_) => $slf.unit_manager.borrow_mut().$load(description),
-                        &UnitStatus::UpdateStarted(_) => $slf.unit_manager.borrow_mut().$load(description),
-                        x => panic!("Unexpected unit status: {}", x),
-                    }
-                };
-
-                if let Err(e) = load_result {
-                    $statuses.insert(id.clone(), UnitStatus::LoadFailed(format!("{}", e)));
+    ($slf:ident, $statuses:ident, $dirty:ident, $descriptions:ident, $load:ident) => {{
+        let mut to_remove = vec![];
+        for (id, _) in $slf.$dirty.borrow().iter() {
+            let load_result = {
+                let status = $statuses.get(id);
+                if status.is_none() {
                     to_remove.push(id.clone());
+                    continue;
                 }
-            }
-            let mut dirty = $slf.$dirty.borrow_mut();
-            for id in to_remove {
-                dirty.remove(&id);
+                let status = status.unwrap();
+
+                let descriptions = $slf.$descriptions.borrow();
+                let description = descriptions.get(id);
+                if description.is_none() {
+                    to_remove.push(id.clone());
+                    continue;
+                }
+                let description = description.unwrap();
+
+                $slf.unit_manager.borrow_mut().unload(id);
+
+                match status {
+                    &UnitStatus::LoadStarted(_) => {
+                        $slf.unit_manager.borrow_mut().$load(description)
+                    }
+                    &UnitStatus::UpdateStarted(_) => {
+                        $slf.unit_manager.borrow_mut().$load(description)
+                    }
+                    x => panic!("Unexpected unit status: {}", x),
+                }
+            };
+
+            if let Err(e) = load_result {
+                $statuses.insert(id.clone(), UnitStatus::LoadFailed(format!("{}", e)));
+                to_remove.push(id.clone());
             }
         }
-    }
+        let mut dirty = $slf.$dirty.borrow_mut();
+        for id in to_remove {
+            dirty.remove(&id);
+        }
+    }};
 }
 
 macro_rules! select_and_activate_units {
-    ($slf:ident, $dirty:ident) => {
-        {
-            for (id, _) in $slf.$dirty.borrow().iter() {
-                $slf.unit_manager.borrow_mut().select(id);
-                $slf.unit_manager.borrow_mut().activate(id);
-            }
-            $slf.$dirty.borrow_mut().clear();
+    ($slf:ident, $dirty:ident) => {{
+        for (id, _) in $slf.$dirty.borrow().iter() {
+            $slf.unit_manager.borrow_mut().select(id);
+            $slf.unit_manager.borrow_mut().activate(id);
         }
-    }
+        $slf.$dirty.borrow_mut().clear();
+    }};
 }
 
 macro_rules! load_units {
     ($slf:ident, $statuses:ident, $dirty:ident, $descriptions:ident, $load:ident) => {
         load_units_for_activation!($slf, $statuses, $dirty, $descriptions, $load);
         $slf.$dirty.borrow_mut().clear();
-    }
+    };
 }
 
 pub struct UnitLibrary {
@@ -179,13 +180,13 @@ impl UnitLibrary {
     fn mark_dirty(&self, name: &UnitName) {
         // Add the unit name to a list of "dirty units" that will be checked during "rescan()"
         match name.kind() {
-            &UnitKind::Interface => self.dirty_interfaces.borrow_mut().insert(name.clone(), ()),
-            &UnitKind::Jig => self.dirty_jigs.borrow_mut().insert(name.clone(), ()),
-            &UnitKind::Logger => self.dirty_loggers.borrow_mut().insert(name.clone(), ()),
-            &UnitKind::Scenario => self.dirty_scenarios.borrow_mut().insert(name.clone(), ()),
-            &UnitKind::Test => self.dirty_tests.borrow_mut().insert(name.clone(), ()),
-            &UnitKind::Trigger => self.dirty_triggers.borrow_mut().insert(name.clone(), ()),
-            &UnitKind::Internal => None,
+            UnitKind::Interface => self.dirty_interfaces.borrow_mut().insert(name.clone(), ()),
+            UnitKind::Jig => self.dirty_jigs.borrow_mut().insert(name.clone(), ()),
+            UnitKind::Logger => self.dirty_loggers.borrow_mut().insert(name.clone(), ()),
+            UnitKind::Scenario => self.dirty_scenarios.borrow_mut().insert(name.clone(), ()),
+            UnitKind::Test => self.dirty_tests.borrow_mut().insert(name.clone(), ()),
+            UnitKind::Trigger => self.dirty_triggers.borrow_mut().insert(name.clone(), ()),
+            UnitKind::Internal => None,
         };
     }
 
@@ -216,9 +217,8 @@ impl UnitLibrary {
                 }
             }
 
-            for (scenario_name, scenario_description) in self.scenario_descriptions
-                .borrow()
-                .iter() {
+            for (scenario_name, scenario_description) in self.scenario_descriptions.borrow().iter()
+            {
                 if scenario_description.supports_jig(jig_name) {
                     self.dirty_scenarios
                         .borrow_mut()
@@ -226,27 +226,29 @@ impl UnitLibrary {
                 }
             }
 
-            for (interface_name, interface_description) in self.interface_descriptions
-                .borrow()
-                .iter() {
+            for (interface_name, interface_description) in
+                self.interface_descriptions.borrow().iter()
+            {
                 if interface_description.supports_jig(jig_name) {
-                    self.dirty_interfaces.borrow_mut().insert(interface_name.clone(), ());
+                    self.dirty_interfaces
+                        .borrow_mut()
+                        .insert(interface_name.clone(), ());
                 }
             }
 
-            for (logger_name, logger_description) in self.logger_descriptions
-                .borrow()
-                .iter() {
+            for (logger_name, logger_description) in self.logger_descriptions.borrow().iter() {
                 if logger_description.supports_jig(jig_name) {
-                    self.dirty_loggers.borrow_mut().insert(logger_name.clone(), ());
+                    self.dirty_loggers
+                        .borrow_mut()
+                        .insert(logger_name.clone(), ());
                 }
             }
 
-            for (trigger_name, trigger_description) in self.trigger_descriptions
-                .borrow()
-                .iter() {
+            for (trigger_name, trigger_description) in self.trigger_descriptions.borrow().iter() {
                 if trigger_description.supports_jig(jig_name) {
-                    self.dirty_triggers.borrow_mut().insert(trigger_name.clone(), ());
+                    self.dirty_triggers
+                        .borrow_mut()
+                        .insert(trigger_name.clone(), ());
                 }
             }
         }
@@ -269,7 +271,10 @@ impl UnitLibrary {
         {
             let mut to_remove = vec![];
             for (id, _) in self.dirty_jigs.borrow().iter() {
-                match *statuses.get(id).expect("Unable to find dirty jig in status list") {
+                match *statuses
+                    .get(id)
+                    .expect("Unable to find dirty jig in status list")
+                {
                     UnitStatus::UnloadStarted(_) | UnitStatus::LoadFailed(_) => {
                         self.jig_descriptions.borrow_mut().remove(id);
                         self.unit_manager.borrow_mut().unload(id);
@@ -279,7 +284,10 @@ impl UnitLibrary {
                 }
             }
             for (id, _) in self.dirty_tests.borrow().iter() {
-                match *statuses.get(id).expect("Unable to find dirty test in status list") {
+                match *statuses
+                    .get(id)
+                    .expect("Unable to find dirty test in status list")
+                {
                     UnitStatus::UnloadStarted(_) | UnitStatus::LoadFailed(_) => {
                         self.test_descriptions.borrow_mut().remove(id);
                         self.unit_manager.borrow_mut().unload(id);
@@ -289,7 +297,10 @@ impl UnitLibrary {
                 }
             }
             for (id, _) in self.dirty_scenarios.borrow().iter() {
-                match *statuses.get(id).expect("Unable to find dirty scenario in status list") {
+                match *statuses
+                    .get(id)
+                    .expect("Unable to find dirty scenario in status list")
+                {
                     UnitStatus::UnloadStarted(_) | UnitStatus::LoadFailed(_) => {
                         self.scenario_descriptions.borrow_mut().remove(id);
                         self.unit_manager.borrow_mut().unload(id);
@@ -299,7 +310,10 @@ impl UnitLibrary {
                 }
             }
             for (id, _) in self.dirty_interfaces.borrow().iter() {
-                match *statuses.get(id).expect("Unable to find dirty interface in status list") {
+                match *statuses
+                    .get(id)
+                    .expect("Unable to find dirty interface in status list")
+                {
                     UnitStatus::UnloadStarted(_) | UnitStatus::LoadFailed(_) => {
                         self.interface_descriptions.borrow_mut().remove(id);
                         self.unit_manager.borrow_mut().unload(id);
@@ -310,7 +324,10 @@ impl UnitLibrary {
             }
 
             for (id, _) in self.dirty_loggers.borrow().iter() {
-                match *statuses.get(id).expect("Unable to find dirty logger in status list") {
+                match *statuses
+                    .get(id)
+                    .expect("Unable to find dirty logger in status list")
+                {
                     UnitStatus::UnloadStarted(_) | UnitStatus::LoadFailed(_) => {
                         self.logger_descriptions.borrow_mut().remove(id);
                         self.unit_manager.borrow_mut().unload(id);
@@ -321,7 +338,10 @@ impl UnitLibrary {
             }
 
             for (id, _) in self.dirty_triggers.borrow().iter() {
-                match *statuses.get(id).expect("Unable to find dirty trigger in status list") {
+                match *statuses
+                    .get(id)
+                    .expect("Unable to find dirty trigger in status list")
+                {
                     UnitStatus::UnloadStarted(_) | UnitStatus::LoadFailed(_) => {
                         self.trigger_descriptions.borrow_mut().remove(id);
                         self.unit_manager.borrow_mut().unload(id);
@@ -349,19 +369,43 @@ impl UnitLibrary {
         load_units_for_activation!(self, statuses, dirty_jigs, jig_descriptions, load_jig);
 
         // 5. Load all Interfaces that are compatible with this Jig.
-        load_units_for_activation!(self, statuses, dirty_interfaces, interface_descriptions, load_interface);
+        load_units_for_activation!(
+            self,
+            statuses,
+            dirty_interfaces,
+            interface_descriptions,
+            load_interface
+        );
 
         // 6. Load all loggers that are compatible with this Jig.
-        load_units_for_activation!(self, statuses, dirty_loggers, logger_descriptions, load_logger);
+        load_units_for_activation!(
+            self,
+            statuses,
+            dirty_loggers,
+            logger_descriptions,
+            load_logger
+        );
 
         // 7. Load all Triggers that are compatible with this Jig.
-        load_units_for_activation!(self, statuses, dirty_triggers, trigger_descriptions, load_trigger);
+        load_units_for_activation!(
+            self,
+            statuses,
+            dirty_triggers,
+            trigger_descriptions,
+            load_trigger
+        );
 
         // 8. Load all Tests that are compatible with this Jig.
         load_units!(self, statuses, dirty_tests, test_descriptions, load_test);
 
         // 9. Load all Scenarios that are compatible with this Jig.
-        load_units!(self, statuses, dirty_scenarios, scenario_descriptions, load_scenario);
+        load_units!(
+            self,
+            statuses,
+            dirty_scenarios,
+            scenario_descriptions,
+            load_scenario
+        );
 
         // 10. Activate all jigs that were just loaded.
         select_and_activate_units!(self, dirty_jigs);
@@ -383,35 +427,126 @@ impl UnitLibrary {
 
     pub fn process_message(&self, evt: &UnitEvent) {
         match evt {
-            &UnitEvent::Status(ref msg) =>  {
-                let &UnitStatusEvent {ref name, ref status} = msg;
+            UnitEvent::Status(ref msg) => {
+                let &UnitStatusEvent {
+                    ref name,
+                    ref status,
+                } = msg;
 
                 match status {
-                    &UnitStatus::LoadStarted(ref path) => {
-                        process_if!(self, name, status, UnitKind::Interface, path, InterfaceDescription, interface_descriptions);
-                        process_if!(self, name, status, UnitKind::Logger, path, LoggerDescription, logger_descriptions);
-                        process_if!(self, name, status, UnitKind::Jig, path, JigDescription, jig_descriptions);
-                        process_if!(self, name, status, UnitKind::Scenario, path, ScenarioDescription, scenario_descriptions);
-                        process_if!(self, name, status, UnitKind::Test, path, TestDescription, test_descriptions);
-                        process_if!(self, name, status, UnitKind::Trigger, path, TriggerDescription, trigger_descriptions);
+                    UnitStatus::LoadStarted(ref path) => {
+                        process_if!(
+                            self,
+                            name,
+                            status,
+                            UnitKind::Interface,
+                            path,
+                            InterfaceDescription,
+                            interface_descriptions
+                        );
+                        process_if!(
+                            self,
+                            name,
+                            status,
+                            UnitKind::Logger,
+                            path,
+                            LoggerDescription,
+                            logger_descriptions
+                        );
+                        process_if!(
+                            self,
+                            name,
+                            status,
+                            UnitKind::Jig,
+                            path,
+                            JigDescription,
+                            jig_descriptions
+                        );
+                        process_if!(
+                            self,
+                            name,
+                            status,
+                            UnitKind::Scenario,
+                            path,
+                            ScenarioDescription,
+                            scenario_descriptions
+                        );
+                        process_if!(
+                            self,
+                            name,
+                            status,
+                            UnitKind::Test,
+                            path,
+                            TestDescription,
+                            test_descriptions
+                        );
+                        process_if!(
+                            self,
+                            name,
+                            status,
+                            UnitKind::Trigger,
+                            path,
+                            TriggerDescription,
+                            trigger_descriptions
+                        );
                     }
-                    &UnitStatus::UpdateStarted(ref path) => {
-                        process_if!(self, name, status, UnitKind::Interface, path, InterfaceDescription, interface_descriptions);
-                        process_if!(self, name, status, UnitKind::Jig, path, JigDescription, jig_descriptions);
-                        process_if!(self, name, status, UnitKind::Logger, path, LoggerDescription, logger_descriptions);
-                        process_if!(self, name, status, UnitKind::Scenario, path, ScenarioDescription, scenario_descriptions);
-                        process_if!(self, name, status, UnitKind::Trigger, path, TriggerDescription, trigger_descriptions);
+                    UnitStatus::UpdateStarted(ref path) => {
+                        process_if!(
+                            self,
+                            name,
+                            status,
+                            UnitKind::Interface,
+                            path,
+                            InterfaceDescription,
+                            interface_descriptions
+                        );
+                        process_if!(
+                            self,
+                            name,
+                            status,
+                            UnitKind::Jig,
+                            path,
+                            JigDescription,
+                            jig_descriptions
+                        );
+                        process_if!(
+                            self,
+                            name,
+                            status,
+                            UnitKind::Logger,
+                            path,
+                            LoggerDescription,
+                            logger_descriptions
+                        );
+                        process_if!(
+                            self,
+                            name,
+                            status,
+                            UnitKind::Scenario,
+                            path,
+                            ScenarioDescription,
+                            scenario_descriptions
+                        );
+                        process_if!(
+                            self,
+                            name,
+                            status,
+                            UnitKind::Trigger,
+                            path,
+                            TriggerDescription,
+                            trigger_descriptions
+                        );
                     }
-                    &UnitStatus::UnloadStarted(ref path) => {
+                    UnitStatus::UnloadStarted(ref path) => {
                         self.unit_status
                             .borrow_mut()
                             .insert(name.clone(), UnitStatus::UnloadStarted(path.clone()));
                         self.mark_dirty(name);
-                    },
+                    }
                     _ => (),
                 }
-            },
-            &UnitEvent::RescanRequest => self.rescan(),
+            }
+            UnitEvent::RescanRequest => self.rescan(),
             _ => (),
         }
 
@@ -419,6 +554,7 @@ impl UnitLibrary {
         self.unit_manager.borrow().process_message(evt);
     }
 
+    #[cfg(test)]
     pub fn get_manager(&self) -> &RefCell<UnitManager> {
         &self.unit_manager
     }

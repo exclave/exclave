@@ -2,12 +2,12 @@
 // Code has license CC0-1.0 license
 // https://raw.githubusercontent.com/passcod/notify/master/src/debounce/timer.rs
 
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashSet};
 use std::sync::mpsc;
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use std::sync::{Arc, Condvar, Mutex};
-use std::collections::{BinaryHeap, HashSet};
-use std::cmp::Ordering;
 
 use super::super::unitbroadcaster::{UnitBroadcaster, UnitEvent};
 
@@ -44,13 +44,14 @@ struct ScheduleWorker {
 }
 
 impl ScheduleWorker {
-    fn new(trigger: Arc<Condvar>,
-           request_source: mpsc::Receiver<Action>,
-           broadcaster: &UnitBroadcaster)
-           -> ScheduleWorker {
+    fn new(
+        trigger: Arc<Condvar>,
+        request_source: mpsc::Receiver<Action>,
+        broadcaster: &UnitBroadcaster,
+    ) -> ScheduleWorker {
         ScheduleWorker {
-            trigger: trigger,
-            request_source: request_source,
+            trigger,
+            request_source,
             schedule: BinaryHeap::new(),
             ignore: HashSet::new(),
             broadcaster: broadcaster.clone(),
@@ -135,9 +136,7 @@ pub struct WatchTimer {
 }
 
 impl WatchTimer {
-    pub fn new(broadcaster: &UnitBroadcaster,
-               delay: Duration)
-               -> WatchTimer {
+    pub fn new(broadcaster: &UnitBroadcaster, delay: Duration) -> WatchTimer {
         let (schedule_tx, schedule_rx) = mpsc::channel();
         let trigger = Arc::new(Condvar::new());
 
@@ -149,9 +148,9 @@ impl WatchTimer {
 
         WatchTimer {
             counter: 0,
-            schedule_tx: schedule_tx,
-            trigger: trigger,
-            delay: delay,
+            schedule_tx,
+            trigger,
+            delay,
         }
     }
 
@@ -162,7 +161,7 @@ impl WatchTimer {
             .send(Action::Schedule(ScheduledEvent {
                 id: self.counter,
                 when: Instant::now() + self.delay,
-                event: event,
+                event,
             }))
             .expect("Failed to send a request to the global scheduling worker");
 
